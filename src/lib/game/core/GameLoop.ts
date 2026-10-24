@@ -19,6 +19,8 @@ export class GameLoop {
 	avgFrameMs = 16.7;
 	/** When true, fixed steps are skipped (paused) but frames still render. */
 	frozen = false;
+	/** Simulation speed (hit-stop, slow motion). Rendering keeps running at real time. */
+	timeScale = 1;
 	readonly maxSteps = 5;
 
 	constructor(
@@ -71,7 +73,7 @@ export class GameLoop {
 			this.fps = Math.round(1000 / this.avgFrameMs);
 		}
 		if (!this.frozen) {
-			this.acc += dt;
+			this.acc += dt * this.timeScale;
 			let steps = 0;
 			while (this.acc >= this.fixedDt && steps < this.maxSteps) {
 				this.hooks.fixed(this.fixedDt);
@@ -80,7 +82,7 @@ export class GameLoop {
 			}
 			if (steps === this.maxSteps) this.acc = 0;
 		}
-		this.hooks.frame(dt, this.frozen ? 1 : this.acc / this.fixedDt);
+		this.hooks.frame(dt, this.frozen ? 1 : Math.min(1, this.acc / this.fixedDt));
 	};
 
 	dispose(): void {

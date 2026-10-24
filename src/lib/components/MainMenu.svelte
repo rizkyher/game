@@ -1,35 +1,43 @@
 <script lang="ts">
-	import type { Game } from '../game/core/Game';
-
-	let { game, onplay, onopen }: { game: Game | null; onplay: () => void; onopen: (p: 'settings' | 'controls' | 'progress') => void } = $props();
-	const best = $derived(game ? game.save.data.bestChaos : 0);
-	const honey = $derived(game ? game.save.data.honey : 0);
+	let {
+		hasSave,
+		onnew,
+		oncontinue,
+		onsettings,
+		oncontrols
+	}: { hasSave: boolean; onnew: () => void; oncontinue: () => void; onsettings: () => void; oncontrols: () => void } = $props();
+	let confirmNew = $state(false);
 </script>
 
-<div class="absolute inset-0 flex flex-col items-center justify-between bg-gradient-to-b from-black/10 via-transparent to-black/30 px-4 py-10">
-	<div class="text-center">
-		<div class="text-6xl drop-shadow-lg sm:text-7xl">🐝</div>
-		<h1 class="bm-stroke text-6xl leading-none font-black tracking-tight text-honey-300 drop-shadow-[0_6px_0_rgba(62,42,23,0.6)] sm:text-8xl">
-			BUZZ<br />MAYHEM
-		</h1>
-		<p class="mt-3 inline-block rounded-full bg-bark-800/80 px-4 py-1 text-sm font-bold text-honey-100 sm:text-base">
-			A tiny bee. A giant world. Absolutely no rules.
+<div class="absolute inset-0 z-30 flex items-center bg-[linear-gradient(90deg,rgba(7,6,15,0.92)_0%,rgba(7,6,15,0.65)_38%,transparent_70%)]">
+	<div class="af-fade-in ml-[8vw] flex w-[420px] flex-col">
+		<div class="font-display text-sm tracking-[0.5em] text-gold-400">A TALE OF</div>
+		<h1 class="af-title mt-1 text-6xl leading-none font-black tracking-[0.18em]">AETHERFALL</h1>
+		<div class="mt-2 text-xl tracking-[0.3em] text-arcane-300 italic">Echoes of the Arcane</div>
+		<div class="af-divider my-6 w-3/4"></div>
+		<p class="mb-8 text-lg leading-snug text-[#e8dcc4]/85">
+			The Broken Seal weakens. Corruption spreads from the Forgotten Sanctuary, and only the last Arcanist of Lumen Hollow can master fire, frost, storm and wind to stop the Crystal Tyrant.
 		</p>
-	</div>
-
-	<div class="flex w-full max-w-xs flex-col gap-3">
-		<button class="bm-btn py-4 text-2xl" onclick={onplay}>▶ Play</button>
-		<div class="grid grid-cols-3 gap-2">
-			<button class="bm-btn bm-btn-ghost py-2 text-sm" onclick={() => onopen('settings')}>⚙️ Settings</button>
-			<button class="bm-btn bm-btn-ghost py-2 text-sm" onclick={() => onopen('controls')}>🎮 Controls</button>
-			<button class="bm-btn bm-btn-ghost py-2 text-sm" onclick={() => onopen('progress')}>🏆 Progress</button>
+		<div class="flex flex-col gap-3">
+			{#if hasSave}
+				<button class="af-btn af-btn-primary h-12 text-base" onclick={oncontinue}>Continue</button>
+			{/if}
+			{#if confirmNew}
+				<div class="af-panel px-4 py-3">
+					<p class="text-base">Begin a new journey? Your current progress will be lost.</p>
+					<div class="mt-3 flex gap-2">
+						<button class="af-btn h-10 flex-1 text-sm" onclick={onnew}>Begin anew</button>
+						<button class="af-btn h-10 flex-1 text-sm" onclick={() => (confirmNew = false)}>Cancel</button>
+					</div>
+				</div>
+			{:else}
+				<button class="af-btn {hasSave ? '' : 'af-btn-primary'} h-12 text-base" onclick={() => (hasSave ? (confirmNew = true) : onnew())}>New Journey</button>
+			{/if}
+			<div class="flex gap-3">
+				<button class="af-btn h-10 flex-1 text-sm" onclick={onsettings}>Settings</button>
+				<button class="af-btn h-10 flex-1 text-sm" onclick={oncontrols}>Controls</button>
+			</div>
 		</div>
-		{#if best > 0 || honey > 0}
-			<p class="text-center text-sm font-bold text-white drop-shadow">Best chaos {best.toLocaleString()} · Honey {honey}</p>
-		{/if}
+		<p class="mt-8 text-sm text-gold-400/70 italic">Best with keyboard &amp; mouse. Click Continue or New Journey to capture the mouse; Esc releases it.</p>
 	</div>
-
-	<p class="rounded-full bg-black/35 px-4 py-1.5 text-center text-xs font-semibold text-white/90 sm:text-sm">
-		Play captures your mouse for flying · <b>Esc</b> releases it · works best with a keyboard &amp; mouse
-	</p>
 </div>

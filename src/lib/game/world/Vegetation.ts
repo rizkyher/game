@@ -1,546 +1,488 @@
 import * as THREE from 'three';
-import type { Terrain } from './TerrainGenerator';
+import type { Terrain } from './Terrain';
 import type { PhysicsWorld } from '../physics/PhysicsWorld';
-import { HIVE, LANDMARKS, WORLD_SEED, edgeDistance, landmark } from './Biomes';
+import { Random, hash2 } from '../utils/Random';
 import { Noise2D } from '../utils/Noise';
-import { Random } from '../utils/Random';
-import { SpatialHash, type SpatialItem } from '../utils/SpatialHash';
-import { merge, prep } from '../utils/geometry';
-import { tintMaterial, windMaterial } from './Materials';
-import {
-	branchGeometry,
-	bushGeometry,
-	canopyGeometry,
-	fernGeometry,
-	flowerShape,
-	mushroomGeometry,
-	rockGeometry,
-	trunkGeometry,
-	type FlowerShape,
-	type FlowerType
-} from './Flora';
+import { WORLD_HALF, edgeDistance, hollowMask, roadDistance, sanctuaryMask } from './WorldLayout';
+import { glowMaterial, windMaterial } from './Materials';
+import * as F from './Flora';
 
-export interface VegLayer {
-	mesh: THREE.InstancedMesh;
-	/** Max render distance for this layer (before the global draw distance clamp). */
-	maxDist: number;
-	total: number;
-	/** Layers that thin out on lower graphics presets. */
-	densityScaled: boolean;
-	wobble?: THREE.InstancedBufferAttribute;
-}
-
-export interface ChunkLike {
-	minX: number;
-	minZ: number;
-	size: number;
-	index: number;
-	group: THREE.Group;
-	layers: VegLayer[];
-}
-
-export interface FlowerRef extends SpatialItem {
-	y: number;
-	r: number;
-	type: FlowerType;
-	layer: VegLayer;
-	index: number;
-	scale: number;
-	pollen: number;
-	nectarAt: number;
-	wobble: number;
-	wobbleX: number;
-	wobbleZ: number;
-	hitCooldown: number;
-	hidden: boolean;
-	respawnAt: number;
-	matrix: THREE.Matrix4;
-}
-
-const FLOWER_TYPES: FlowerType[] = ['daisy', 'tulip', 'sunflower', 'lavender', 'rose', 'dandelion'];
-
-const PALETTES: Record<FlowerType, number[]> = {
-	daisy: [0xffffff, 0xffffff, 0xffb3d9, 0xc8a2ff, 0xfff07a, 0x9fd8ff, 0xff9e80],
-	tulip: [0xff3b3b, 0xff8c2a, 0xffd23a, 0xff6fae, 0xa35bff, 0xfff6f0],
-	sunflower: [0xffcc1f, 0xffb31a, 0xffd84a],
-	lavender: [0x9b6bd6, 0xb388ff, 0x8a5cc7],
-	rose: [0xe0193a, 0xff7aa8, 0xfff4f0, 0xffd75e, 0xff7f6a],
-	dandelion: [0xffffff]
-};
-
-const FLOWER_DIST: Record<FlowerType, number> = {
-	daisy: 175,
-	tulip: 175,
-	sunflower: 9999,
-	lavender: 230,
-	rose: 175,
-	dandelion: 160
-};
-
-const CANOPY = [0x3f9a3f, 0x4caf50, 0x5cb85c, 0x2e8b57, 0x6bbf59, 0x48a848];
-const CANOPY_SPECIAL = [0xe07ab8, 0xffb347, 0x9b7fe0, 0xf06292];
-
-export interface TreeSpec {
+export interface SiteInfo {
 	x: number;
 	z: number;
-	y: number;
 	h: number;
-	r: number;
-	yaw: number;
-	special: boolean;
+	slope: number;
+	forest: number;
+	high: number;
+	sanct: number;
+	hollow: number;
+	vale: number;
+	edge: number;
+	n: number;
 }
 
+export interface LayerDef {
+	id: string;
+	geo: THREE.BufferGeometry;
+	mat: THREE.Material;
+	lo?: { geo: THREE.BufferGeometry; mat: THREE.Material; dist: number };
+	/** Stratified sample spacing in metres. */
+	cell: number;
+	maxDist: number;
+	shadow: boolean;
+	maxSlope: number;
+	roadClear: number;
+	scale: [number, number];
+	sink?: number;
+	tilt?: number;
+	prob(s: SiteInfo): number;
+	collider?(physics: PhysicsWorld, x: number, y: number, z: number, s: number): void;
+	/** Instances are kept out of clearings by this extra padding (default: excluded entirely). */
+	clearingPad?: number;
+	/** Scales with the quality preset's vegetation density. */
+	optional?: boolean;
+}
+
+export interface Instance {
+	x: number;
+	y: number;
+	z: number;
+	s: number;
+	ry: number;
+	rx: number;
+	rz: number;
+}
+
+/** Scattered instances of one layer that fall inside one chunk. */
+export interface LayerBucket {
+	layer: LayerDef;
+	items: Instance[];
+}
+
+const _m = new THREE.Matrix4();
+const _q = new THREE.Quaternion();
+const _e = new THREE.Euler();
+const _p = new THREE.Vector3();
+const _s = new THREE.Vector3();
+
 /**
- * Scatters flowers, trees, rocks, mushrooms, ferns and bushes per chunk using deterministic
- * noise + RNG, and keeps a spatial index of flower heads for gameplay interaction.
+ * Defines every scattered vegetation/rock layer, scatters them deterministically over the
+ * world (creating static colliders for trunks, rocks and crystals) and builds per-chunk
+ * instanced meshes on demand.
  */
 export class Vegetation {
-	readonly flowers = new SpatialHash<FlowerRef>(16);
-	readonly allFlowers: FlowerRef[] = [];
-	readonly trees: TreeSpec[] = [];
-	private shapes = new Map<FlowerType, FlowerShape>();
-	private flowerMats = new Map<FlowerType, THREE.Material>();
-	private noise = new Noise2D(WORLD_SEED + 17);
-	private wobbling = new Set<FlowerRef>();
-	private exclusions: { x: number; z: number; r: number }[] = [];
-	private geos: Record<string, THREE.BufferGeometry> = {};
-	private mats: Record<string, THREE.Material> = {};
-	private m = new THREE.Matrix4();
-	private q = new THREE.Quaternion();
-	private v = new THREE.Vector3();
-	private s = new THREE.Vector3();
-	private c = new THREE.Color();
-	private up = new THREE.Vector3(0, 1, 0);
+	readonly layers: LayerDef[] = [];
+	private materials: THREE.Material[] = [];
+	private geometries: THREE.BufferGeometry[] = [];
+	private noise = new Noise2D(5150);
 	density = 1;
 
 	constructor(
 		private terrain: Terrain,
 		private physics: PhysicsWorld
 	) {
-		for (const t of FLOWER_TYPES) {
-			const shape = flowerShape(t);
-			this.shapes.set(t, shape);
-			this.flowerMats.set(
-				t,
-				windMaterial(
-					{ vertexColors: true, side: THREE.DoubleSide },
-					{ height: shape.height, amount: t === 'sunflower' ? 0.9 : 0.6, wobble: true, tint: true }
-				)
-			);
-		}
-		this.geos.trunk = trunkGeometry();
-		this.geos.branch = branchGeometry();
-		this.geos.canopy = canopyGeometry();
-		this.geos.mushroom = mushroomGeometry(true);
-		this.geos.glow = mushroomGeometry(false);
-		this.geos.fern = fernGeometry();
-		this.geos.bush = bushGeometry(11);
-		this.geos.rock = rockGeometry(7);
-		this.mats.bark = new THREE.MeshLambertMaterial({ vertexColors: true });
-		this.mats.canopy = windMaterial({ vertexColors: true }, { height: 1, amount: 0.05, tint: true });
-		this.mats.tint = tintMaterial({ vertexColors: true });
-		this.mats.rock = tintMaterial({ vertexColors: true, flatShading: true });
-		this.mats.fern = windMaterial({ vertexColors: true, side: THREE.DoubleSide }, { height: 3.6, amount: 0.35 });
-		this.mats.glow = new THREE.MeshBasicMaterial({ vertexColors: true });
-		this.mats.vine = new THREE.MeshLambertMaterial({ vertexColors: true });
-
-		for (const l of LANDMARKS) {
-			if (['picnic', 'garden', 'fairyRing', 'hollowTree', 'hollowLog', 'elderTree', 'birdNest'].includes(l.id)) {
-				this.exclusions.push({ x: l.x, z: l.z, r: l.id === 'elderTree' ? 34 : l.id === 'birdNest' ? 14 : 30 });
-			}
-		}
-		this.exclusions.push({ x: HIVE.x, z: HIVE.z, r: 66 });
-		this.exclusions.push({ x: terrain.pond.x, z: terrain.pond.z, r: 58 });
-		this.exclusions.push({ x: -120, z: 70, r: 14 }); // cherry tree near the picnic
+		this.defineLayers();
 	}
 
-	private excluded(x: number, z: number, pad = 0): boolean {
-		for (const e of this.exclusions) {
-			const dx = x - e.x;
-			const dz = z - e.z;
-			const r = e.r + pad;
-			if (dx * dx + dz * dz < r * r) return true;
-		}
-		return false;
+	private track<T extends THREE.Material>(m: T): T {
+		this.materials.push(m);
+		return m;
 	}
 
-	private makeLayer(
-		chunk: ChunkLike,
-		geo: THREE.BufferGeometry,
-		mat: THREE.Material,
-		count: number,
-		maxDist: number,
-		opts: { shadow?: boolean; densityScaled?: boolean; wobble?: boolean; name?: string }
-	): VegLayer {
-		const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, count));
-		mesh.name = opts.name ?? 'veg';
-		mesh.count = count;
-		mesh.castShadow = !!opts.shadow;
-		mesh.receiveShadow = true;
-		let wobble: THREE.InstancedBufferAttribute | undefined;
-		if (opts.wobble) {
-			// Per-instance attribute; geometry is shared so we clone a lightweight wrapper per layer.
-			const g = new THREE.InstancedBufferGeometry();
-			g.index = geo.index;
-			for (const [k, a] of Object.entries(geo.attributes)) g.setAttribute(k, a);
-			wobble = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(1, count) * 3), 3);
-			wobble.setUsage(THREE.DynamicDrawUsage);
-			g.setAttribute('aWobble', wobble);
-			mesh.geometry = g;
-		}
-		const layer: VegLayer = { mesh, maxDist, total: count, densityScaled: !!opts.densityScaled, wobble };
-		chunk.layers.push(layer);
-		chunk.group.add(mesh);
-		return layer;
+	private geo(g: THREE.BufferGeometry): THREE.BufferGeometry {
+		this.geometries.push(g);
+		return g;
 	}
 
-	private finishLayer(layer: VegLayer): void {
-		layer.mesh.instanceMatrix.needsUpdate = true;
-		if (layer.mesh.instanceColor) layer.mesh.instanceColor.needsUpdate = true;
-		layer.mesh.computeBoundingSphere();
-		layer.mesh.computeBoundingBox();
-	}
+	private defineLayers(): void {
+		const lambert = this.track(new THREE.MeshLambertMaterial({ vertexColors: true }));
+		const leafWind = this.track(windMaterial({ vertexColors: true }, { height: 10, amount: 0.22 }));
+		const oakWind = this.track(windMaterial({ vertexColors: true }, { height: 10, amount: 0.2 }));
+		const pineWind = this.track(windMaterial({ vertexColors: true }, { height: 13, amount: 0.15 }));
+		const lowWind = this.track(windMaterial({ vertexColors: true, side: THREE.DoubleSide }, { height: 1.4, amount: 0.3 }));
+		const ancientMat = this.track(glowMaterial({ vertexColors: true, roughness: 0.9, glow: 0x6ff5d8, glowStrength: 1.6, pulse: 0.4, sway: { height: 22, amount: 0.22 } }));
+		const cyanShroom = this.track(glowMaterial({ vertexColors: true, roughness: 0.5, glow: 0x46f0ff, glowStrength: 2.4 }));
+		const pinkShroom = this.track(glowMaterial({ vertexColors: true, roughness: 0.5, glow: 0xff5ae0, glowStrength: 2.4 }));
+		const blueFlower = this.track(glowMaterial({ vertexColors: true, roughness: 0.6, glow: 0x6fb8ff, glowStrength: 2.8, sway: { height: 1, amount: 0.25 }, side: THREE.DoubleSide }));
+		const violetCrystal = this.track(glowMaterial({ vertexColors: true, roughness: 0.25, metalness: 0.15, glow: 0xb070ff, glowStrength: 1.8, flatShading: true }));
+		const cyanCrystal = this.track(glowMaterial({ vertexColors: true, roughness: 0.25, metalness: 0.15, glow: 0x50e8ff, glowStrength: 1.8, flatShading: true }));
+		const runeStone = this.track(glowMaterial({ vertexColors: true, roughness: 0.85, glow: 0x7fd8ff, glowStrength: 2.2, pulse: 0.5 }));
 
-	populate(chunk: ChunkLike): void {
-		const rng = new Random(WORLD_SEED * 31 + chunk.index * 7919);
-		this.scatterFlowers(chunk, rng);
-		this.scatterTrees(chunk, rng);
-		this.scatterSmall(chunk, rng);
-	}
+		const ancientLo = this.geo(F.treeLod(20, 9, 0x3f8a5a, 0x0e3326));
+		const forestLo = this.geo(F.treeLod(9.5, 3.6, 0x4f9a52, 0x143a22));
+		const oakLo = this.geo(F.treeLod(9.5, 3.6, 0x9aac4a, 0x2f4a1a));
+		const pineLo = this.geo(F.treeLod(11, 2.6, 0x3f7a62, 0x1b3a3a));
 
-	private flowerWeights(x: number, z: number, d: number, f: number, out: number[]): number {
-		const n = this.noise;
-		const meadow = 1 - f;
-		const roses = landmark('roses');
-		const lav = landmark('lavender');
-		const sun = landmark('sunflowers');
-		const dRose = Math.hypot(x - roses.x, z - roses.z);
-		const dLav = Math.hypot(x - lav.x, z - lav.z);
-		const dSun = Math.hypot(x - sun.x, z - sun.z);
-		out[0] = d * (0.28 + 0.5 * Math.max(0, n.noise(x * 0.012 + 3, z * 0.012))) * (meadow * 0.9 + 0.15);
-		out[1] = d * 0.45 * Math.max(0, n.noise(x * 0.014 - 40, z * 0.014 + 9)) * (meadow + 0.25);
-		out[2] = dSun < 62 ? 0.32 * (1 - dSun / 70) + 0.05 : d * 0.012 * meadow;
-		const row = Math.abs(Math.sin((z - lav.z) * 0.32));
-		out[3] = dLav < 72 ? (row > 0.55 ? 0.95 : 0.02) * (1 - Math.max(0, dLav - 55) / 17) : d * 0.03 * meadow;
-		out[4] = dRose < 46 ? 0.7 : d * 0.09 * meadow * Math.max(0, n.noise(x * 0.02 + 70, z * 0.02 - 70) + 0.2);
-		out[5] = d * 0.07 * meadow;
-		return out[0] + out[1] + out[2] + out[3] + out[4] + out[5];
-	}
-
-	private scatterFlowers(chunk: ChunkLike, rng: Random): void {
-		const placements: Record<FlowerType, { x: number; y: number; z: number; s: number; yaw: number }[]> = {
-			daisy: [],
-			tulip: [],
-			sunflower: [],
-			lavender: [],
-			rose: [],
-			dandelion: []
-		};
-		const w = [0, 0, 0, 0, 0, 0];
-		const candidates = 560;
-		for (let i = 0; i < candidates; i++) {
-			const x = chunk.minX + rng.next() * chunk.size;
-			const z = chunk.minZ + rng.next() * chunk.size;
-			const d = this.terrain.densityAt(x, z);
-			if (d < 0.05) continue;
-			if (this.excluded(x, z, -10)) continue;
-			const f = this.terrain.forestAt(x, z);
-			const total = this.flowerWeights(x, z, d, f, w);
-			if (rng.next() > Math.min(1, total)) continue;
-			let pick = rng.next() * total;
-			let t = 0;
-			for (; t < 5; t++) {
-				pick -= w[t];
-				if (pick <= 0) break;
-			}
-			const type = FLOWER_TYPES[t];
-			const y = this.terrain.heightAt(x, z) - 0.15;
-			placements[type].push({ x, y, z, s: rng.range(0.8, 1.28), yaw: rng.range(0, Math.PI * 2) });
-		}
-		for (const type of FLOWER_TYPES) {
-			const list = placements[type];
-			if (!list.length) continue;
-			const shape = this.shapes.get(type)!;
-			const layer = this.makeLayer(chunk, shape.geo, this.flowerMats.get(type)!, list.length, FLOWER_DIST[type], {
-				shadow: type === 'sunflower',
-				densityScaled: type !== 'sunflower',
-				wobble: true,
-				name: type
-			});
-			const pal = PALETTES[type];
-			list.forEach((p, i) => {
-				this.q.setFromAxisAngle(this.up, p.yaw);
-				this.s.setScalar(p.s);
-				this.v.set(p.x, p.y, p.z);
-				const matrix = new THREE.Matrix4().compose(this.v, this.q, this.s);
-				layer.mesh.setMatrixAt(i, matrix);
-				layer.mesh.setColorAt(i, this.c.setHex(pal[rng.int(0, pal.length - 1)]));
-				const head = shape.head.clone().multiplyScalar(p.s).applyQuaternion(this.q);
-				const ref: FlowerRef = {
-					x: p.x + head.x,
-					z: p.z + head.z,
-					y: p.y + head.y,
-					r: shape.headRadius * p.s,
-					type,
-					layer,
-					index: i,
-					scale: p.s,
-					pollen: 1,
-					nectarAt: 0,
-					wobble: 0,
-					wobbleX: 0,
-					wobbleZ: 0,
-					hitCooldown: 0,
-					hidden: false,
-					respawnAt: 0,
-					matrix
-				};
-				this.flowers.insert(ref);
-				this.allFlowers.push(ref);
-				if (type === 'sunflower') {
-					this.physics.addCylinder(p.x, p.y + 8.5 * p.s, p.z, 8.5 * p.s, 0.45 * p.s, { kind: 'static', material: 'plant' });
+		this.layers.push(
+			{
+				id: 'ancient',
+				geo: this.geo(F.ancientTree(11)),
+				mat: ancientMat,
+				lo: { geo: ancientLo, mat: lambert, dist: 170 },
+				cell: 30,
+				maxDist: 700,
+				shadow: true,
+				maxSlope: 0.5,
+				roadClear: 9,
+				scale: [0.85, 1.25],
+				sink: 0.4,
+				prob: (s) => (s.forest > 0.65 ? 0.55 : 0),
+				collider: (ph, x, y, z, sc) => ph.addCylinder(x, y + 6 * sc, z, 6 * sc, 1.55 * sc, { kind: 'static', material: 'wood' })
+			},
+			{
+				id: 'forestTree',
+				geo: this.geo(F.forestTree(21)),
+				mat: leafWind,
+				lo: { geo: forestLo, mat: lambert, dist: 120 },
+				cell: 8.5,
+				maxDist: 520,
+				shadow: true,
+				maxSlope: 0.7,
+				roadClear: 5,
+				scale: [0.8, 1.35],
+				sink: 0.2,
+				prob: (s) => s.forest * 0.62 * (0.6 + 0.4 * s.n) + s.vale * 0.025 * Math.max(0, s.n),
+				collider: (ph, x, y, z, sc) => ph.addCylinder(x, y + 2.5 * sc, z, 2.5 * sc, 0.42 * sc, { kind: 'static', material: 'wood' })
+			},
+			{
+				id: 'oakTree',
+				geo: this.geo(F.forestTree(33, 0x9aac4a, 0x2f4a1a, 0x5a4030)),
+				mat: oakWind,
+				lo: { geo: oakLo, mat: lambert, dist: 120 },
+				cell: 15,
+				maxDist: 520,
+				shadow: true,
+				maxSlope: 0.6,
+				roadClear: 6,
+				scale: [0.9, 1.4],
+				sink: 0.2,
+				prob: (s) => (s.vale + s.hollow * 0.6) * 0.16 * Math.max(0, 0.3 + s.n),
+				collider: (ph, x, y, z, sc) => ph.addCylinder(x, y + 2.5 * sc, z, 2.5 * sc, 0.42 * sc, { kind: 'static', material: 'wood' })
+			},
+			{
+				id: 'pine',
+				geo: this.geo(F.pineTree(41)),
+				mat: pineWind,
+				lo: { geo: pineLo, mat: lambert, dist: 120 },
+				cell: 11,
+				maxDist: 560,
+				shadow: true,
+				maxSlope: 0.95,
+				roadClear: 5,
+				scale: [0.8, 1.5],
+				sink: 0.2,
+				prob: (s) => s.high * 0.2 + (s.edge < 75 && s.h > 12 && s.h < 70 ? 0.42 : 0) + s.sanct * 0.05,
+				collider: (ph, x, y, z, sc) => ph.addCylinder(x, y + 2 * sc, z, 2 * sc, 0.32 * sc, { kind: 'static', material: 'wood' })
+			},
+			{
+				id: 'deadTree',
+				geo: this.geo(F.deadTree(51)),
+				mat: lambert,
+				cell: 14,
+				maxDist: 420,
+				shadow: true,
+				maxSlope: 0.7,
+				roadClear: 6,
+				scale: [0.8, 1.3],
+				sink: 0.2,
+				prob: (s) => s.sanct * 0.32 + s.high * 0.02,
+				collider: (ph, x, y, z, sc) => ph.addCylinder(x, y + 2 * sc, z, 2 * sc, 0.4 * sc, { kind: 'static', material: 'wood' })
+			},
+			{
+				id: 'bush',
+				geo: this.geo(F.bush(61)),
+				mat: leafWind,
+				cell: 6,
+				maxDist: 170,
+				shadow: false,
+				maxSlope: 0.8,
+				roadClear: 4,
+				scale: [0.7, 1.4],
+				sink: 0.15,
+				optional: true,
+				prob: (s) => s.forest * 0.22 + s.vale * 0.06 + s.hollow * 0.08
+			},
+			{
+				id: 'fern',
+				geo: this.geo(F.fern(71)),
+				mat: lowWind,
+				cell: 3.2,
+				maxDist: 85,
+				shadow: false,
+				maxSlope: 0.8,
+				roadClear: 3,
+				scale: [0.8, 1.5],
+				optional: true,
+				prob: (s) => s.forest * 0.45
+			},
+			{
+				id: 'shroomCyan',
+				geo: this.geo(F.glowMushrooms(81, 0x40d8ff)),
+				mat: cyanShroom,
+				cell: 6.5,
+				maxDist: 150,
+				shadow: false,
+				maxSlope: 0.8,
+				roadClear: 3,
+				scale: [0.8, 1.8],
+				optional: true,
+				prob: (s) => s.forest * 0.24
+			},
+			{
+				id: 'shroomPink',
+				geo: this.geo(F.glowMushrooms(91, 0xff58d8)),
+				mat: pinkShroom,
+				cell: 9,
+				maxDist: 150,
+				shadow: false,
+				maxSlope: 0.8,
+				roadClear: 3,
+				scale: [0.8, 1.6],
+				optional: true,
+				prob: (s) => s.forest * 0.12 + s.sanct * 0.06
+			},
+			{
+				id: 'glowFlower',
+				geo: this.geo(F.glowFlowers(101, 0x8fd0ff)),
+				mat: blueFlower,
+				cell: 4.2,
+				maxDist: 90,
+				shadow: false,
+				maxSlope: 0.8,
+				roadClear: 2.5,
+				scale: [0.9, 1.4],
+				optional: true,
+				prob: (s) => s.forest * 0.28 + s.hollow * 0.05
+			},
+			{
+				id: 'flowersWarm',
+				geo: this.geo(F.wildflowers(111, [0xffd84a, 0xfff2d0, 0xff9a4a])),
+				mat: lowWind,
+				cell: 3.4,
+				maxDist: 80,
+				shadow: false,
+				maxSlope: 0.7,
+				roadClear: 2.5,
+				scale: [0.9, 1.4],
+				optional: true,
+				prob: (s) => (s.vale + s.hollow) * 0.3 * (0.5 + 0.5 * s.n)
+			},
+			{
+				id: 'flowersCool',
+				geo: this.geo(F.wildflowers(121, [0xb08aff, 0xff8ad0, 0x8ac8ff])),
+				mat: lowWind,
+				cell: 4,
+				maxDist: 80,
+				shadow: false,
+				maxSlope: 0.7,
+				roadClear: 2.5,
+				scale: [0.9, 1.4],
+				optional: true,
+				prob: (s) => (s.vale + s.hollow) * 0.22 * (0.5 - 0.5 * s.n) + s.high * 0.08
+			},
+			{
+				id: 'heather',
+				geo: this.geo(F.heather(131)),
+				mat: lowWind,
+				cell: 3,
+				maxDist: 85,
+				shadow: false,
+				maxSlope: 0.85,
+				roadClear: 2.5,
+				scale: [0.9, 1.7],
+				optional: true,
+				prob: (s) => s.high * 0.5
+			},
+			{
+				id: 'rock',
+				geo: this.geo(F.rock(141, 0x6a6470)),
+				mat: lambert,
+				cell: 11,
+				maxDist: 360,
+				shadow: true,
+				maxSlope: 2,
+				roadClear: 4,
+				scale: [0.6, 2.2],
+				sink: 0.35,
+				tilt: 0.3,
+				prob: (s) => (0.05 + Math.min(0.4, s.slope * 0.4)) * (1 - s.forest * 0.6) + (s.edge < 70 ? 0.15 : 0),
+				collider: (ph, x, y, z, sc) => {
+					if (sc > 0.9) ph.addBall(x, y + 0.1 * sc, z, 0.85 * sc, { kind: 'static', material: 'stone' });
 				}
-			});
-			this.finishLayer(layer);
-		}
-	}
-
-	private scatterTrees(chunk: ChunkLike, rng: Random): void {
-		const cell = 30;
-		const specs: TreeSpec[] = [];
-		for (let gx = 0; gx < chunk.size / cell; gx++) {
-			for (let gz = 0; gz < chunk.size / cell; gz++) {
-				const x = chunk.minX + (gx + rng.range(0.15, 0.85)) * cell;
-				const z = chunk.minZ + (gz + rng.range(0.15, 0.85)) * cell;
-				const f = this.terrain.forestAt(x, z);
-				const p = f > 0.6 ? 0.82 : f > 0.3 ? 0.3 : 0.018;
-				if (!rng.chance(p)) continue;
-				if (this.excluded(x, z)) continue;
-				if (edgeDistance(x, z) > 455) continue;
-				if (this.terrain.waterLevelAt(x, z) > -Infinity) continue;
-				const sq = { d: 0, level: 0, dx: 0, dz: 0 };
-				this.terrain.streamQuery(x, z, sq);
-				if (sq.d < 16) continue;
-				const forest = f > 0.5;
-				const h = forest ? rng.range(58, 102) : rng.range(30, 46);
-				specs.push({
-					x,
-					z,
-					y: this.terrain.heightAt(x, z),
-					h,
-					r: h * rng.range(0.05, 0.065),
-					yaw: rng.range(0, Math.PI * 2),
-					special: rng.chance(0.1)
-				});
-			}
-		}
-		if (!specs.length) return;
-		this.buildTrees(chunk, specs, rng);
-	}
-
-	/** Builds instanced trunks/branches/canopies + colliders for a set of trees (also used for landmark trees). */
-	buildTrees(chunk: ChunkLike, specs: TreeSpec[], rng: Random): void {
-		const branches: THREE.Matrix4[] = [];
-		const canopies: { m: THREE.Matrix4; c: number }[] = [];
-		const vines: THREE.BufferGeometry[] = [];
-		const trunkLayer = this.makeLayer(chunk, this.geos.trunk, this.mats.bark, specs.length, 9999, { shadow: true, name: 'trunk' });
-		const a = new THREE.Vector3();
-		const b = new THREE.Vector3();
-		specs.forEach((t, i) => {
-			this.trees.push(t);
-			this.q.setFromAxisAngle(this.up, t.yaw);
-			this.v.set(t.x, t.y - 1, t.z);
-			this.s.set(t.r, t.h * 0.93, t.r);
-			trunkLayer.mesh.setMatrixAt(i, this.m.compose(this.v, this.q, this.s));
-			a.set(t.x, t.y - 2, t.z);
-			b.set(t.x, t.y + t.h * 0.5, t.z);
-			this.physics.addCapsuleBetween(a, b, t.r * 0.86);
-			a.copy(b);
-			b.set(t.x, t.y + t.h * 0.92, t.z);
-			this.physics.addCapsuleBetween(a, b, t.r * 0.66);
-			const palette = t.special ? CANOPY_SPECIAL : CANOPY;
-			const color = palette[rng.int(0, palette.length - 1)];
-			const nb = rng.int(3, 5);
-			for (let k = 0; k < nb; k++) {
-				const hb = t.h * rng.range(0.42, 0.8);
-				const yaw = t.yaw + (k / nb) * Math.PI * 2 + rng.range(-0.4, 0.4);
-				const pitch = rng.range(0.75, 1.15);
-				const len = t.h * rng.range(0.26, 0.4);
-				const dir = new THREE.Vector3(Math.sin(pitch) * Math.cos(yaw), Math.cos(pitch), Math.sin(pitch) * Math.sin(yaw));
-				const base = new THREE.Vector3(t.x, t.y + hb, t.z);
-				const br = t.r * 0.33;
-				const q = new THREE.Quaternion().setFromUnitVectors(this.up, dir);
-				branches.push(new THREE.Matrix4().compose(base, q, new THREE.Vector3(br, len, br)));
-				const tip = base.clone().addScaledVector(dir, len);
-				const mid = base.clone().addScaledVector(dir, t.r * 0.8);
-				this.physics.addCapsuleBetween(mid, tip, br * 0.75);
-				for (let c = 0; c < 1; c++) {
-					const sc = t.h * rng.range(0.13, 0.18);
-					const p = tip.clone().add(new THREE.Vector3(rng.range(-1, 1) * sc * 0.5, rng.range(0, 0.6) * sc, rng.range(-1, 1) * sc * 0.5));
-					canopies.push({ m: new THREE.Matrix4().compose(p, this.q.clone(), new THREE.Vector3(sc, sc * 0.78, sc)), c: color });
+			},
+			{
+				id: 'mossRock',
+				geo: this.geo(F.rock(151, 0x4a4a46, 0x3f7a3a)),
+				mat: lambert,
+				cell: 10,
+				maxDist: 300,
+				shadow: true,
+				maxSlope: 2,
+				roadClear: 4,
+				scale: [0.7, 2.4],
+				sink: 0.35,
+				tilt: 0.3,
+				prob: (s) => s.forest * 0.2,
+				collider: (ph, x, y, z, sc) => {
+					if (sc > 0.9) ph.addBall(x, y + 0.1 * sc, z, 0.85 * sc, { kind: 'static', material: 'stone' });
 				}
-				// Hanging vines from some branches in the forest.
-				if (t.h > 50 && rng.chance(0.45)) {
-					const start = base.clone().addScaledVector(dir, len * rng.range(0.45, 0.8));
-					const drop = rng.range(10, 26);
-					const pts = [start];
-					for (let s = 1; s <= 4; s++) {
-						pts.push(start.clone().add(new THREE.Vector3(Math.sin(s * 1.3 + k) * 1.2, -drop * (s / 4), Math.cos(s * 1.1 + k) * 1.2)));
+			},
+			{
+				id: 'crystalViolet',
+				geo: this.geo(F.crystalCluster(161, 0x9a60ff)),
+				mat: violetCrystal,
+				cell: 15,
+				maxDist: 480,
+				shadow: true,
+				maxSlope: 1.2,
+				roadClear: 5,
+				scale: [0.7, 1.8],
+				sink: 0.2,
+				tilt: 0.2,
+				prob: (s) => s.high * 0.22 + s.sanct * 0.14,
+				collider: (ph, x, y, z, sc) => ph.addCylinder(x, y + 1 * sc, z, 1 * sc, 0.7 * sc, { kind: 'static', material: 'stone' })
+			},
+			{
+				id: 'crystalCyan',
+				geo: this.geo(F.crystalCluster(171, 0x3ad8ff, 1.2)),
+				mat: cyanCrystal,
+				cell: 21,
+				maxDist: 480,
+				shadow: true,
+				maxSlope: 1.2,
+				roadClear: 5,
+				scale: [0.7, 1.6],
+				sink: 0.2,
+				tilt: 0.2,
+				prob: (s) => s.high * 0.14 + s.forest * 0.025,
+				collider: (ph, x, y, z, sc) => ph.addCylinder(x, y + 1 * sc, z, 1 * sc, 0.7 * sc, { kind: 'static', material: 'stone' })
+			},
+			{
+				id: 'runeStone',
+				geo: this.geo(F.standingStone(181, 0x7fd8ff)),
+				mat: runeStone,
+				cell: 28,
+				maxDist: 360,
+				shadow: true,
+				maxSlope: 0.5,
+				roadClear: 5,
+				scale: [0.9, 1.3],
+				sink: 0.3,
+				tilt: 0.08,
+				prob: (s) => s.high * 0.14 + s.vale * 0.015,
+				collider: (ph, x, y, z, sc) => ph.addCuboid(x, y + 2 * sc, z, 0.6 * sc, 2 * sc, 0.4 * sc)
+			}
+		);
+		for (const l of this.layers) {
+			l.geo.computeBoundingSphere();
+			l.lo?.geo.computeBoundingSphere();
+		}
+	}
+
+	site(x: number, z: number, out: SiteInfo): SiteInfo {
+		const t = this.terrain;
+		out.x = x;
+		out.z = z;
+		out.h = t.heightAt(x, z);
+		out.slope = t.slopeAt(x, z);
+		out.forest = t.forestAt(x, z);
+		out.high = t.highlandAt(x, z);
+		out.sanct = sanctuaryMask(x, z);
+		out.hollow = hollowMask(x, z);
+		out.vale = Math.max(0, 1 - out.forest - out.high - out.sanct - out.hollow);
+		out.edge = edgeDistance(x, z);
+		out.n = this.noise.fbm(x * 0.02, z * 0.02, 2);
+		return out;
+	}
+
+	/**
+	 * Scatter every layer across the world. Returns instances bucketed by chunk index.
+	 * Colliders are created for all instances up front (cheap, and enemies far from the
+	 * camera still need them); only GPU meshes are streamed.
+	 */
+	scatter(chunkOf: (x: number, z: number) => number, chunkCount: number): LayerBucket[][] {
+		const out: LayerBucket[][] = [];
+		for (let i = 0; i < chunkCount; i++) out.push([]);
+		const site: SiteInfo = { x: 0, z: 0, h: 0, slope: 0, forest: 0, high: 0, sanct: 0, hollow: 0, vale: 0, edge: 0, n: 0 };
+		const t = this.terrain;
+		this.layers.forEach((layer, li) => {
+			const rng = new Random(1000 + li * 7919);
+			const n = Math.floor((WORLD_HALF * 2) / layer.cell);
+			const buckets = new Map<number, LayerBucket>();
+			for (let gz = 0; gz < n; gz++) {
+				for (let gx = 0; gx < n; gx++) {
+					const roll = hash2(gx, gz, li * 31 + 7);
+					const x = -WORLD_HALF + (gx + rng.next()) * layer.cell;
+					const z = -WORLD_HALF + (gz + rng.next()) * layer.cell;
+					if (roll > 0.92) continue; // Leave some natural gaps everywhere.
+					this.site(x, z, site);
+					if (site.edge < 4) continue;
+					if (site.slope > layer.maxSlope) continue;
+					// Cheap probability roll first; road/water/clearing tests are the expensive part.
+					const p = layer.prob(site);
+					if (p <= 0 || hash2(gx * 3 + 1, gz * 5 + 2, li) > p) continue;
+					if (roadDistance(x, z) < layer.roadClear) continue;
+					if (t.inClearing(x, z, layer.clearingPad ?? 0)) continue;
+					if (t.waterLevelAt(x, z) > -1e6) continue;
+					const s = layer.scale[0] + rng.next() * (layer.scale[1] - layer.scale[0]);
+					const tilt = layer.tilt ?? 0.04;
+					const inst: Instance = {
+						x,
+						y: site.h - (layer.sink ?? 0) * s,
+						z,
+						s,
+						ry: rng.next() * Math.PI * 2,
+						rx: (rng.next() - 0.5) * tilt,
+						rz: (rng.next() - 0.5) * tilt
+					};
+					layer.collider?.(this.physics, inst.x, inst.y, inst.z, s);
+					const ci = chunkOf(x, z);
+					let b = buckets.get(ci);
+					if (!b) {
+						b = { layer, items: [] };
+						buckets.set(ci, b);
+						out[ci].push(b);
 					}
-					const tube = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 8, 0.16, 3, false);
-					vines.push(prep(tube, rng.chance(0.5) ? 0x4a8a3a : 0x3c7a34));
-					if (rng.chance(0.6)) {
-						const leafBall = new THREE.IcosahedronGeometry(0.7, 0);
-						const end = pts[pts.length - 1];
-						leafBall.translate(end.x, end.y, end.z);
-						vines.push(prep(leafBall, 0x56a346));
-					}
+					b.items.push(inst);
 				}
-			}
-			const top = new THREE.Vector3(t.x, t.y + t.h * 0.93, t.z);
-			const nc = rng.int(4, 6);
-			for (let c = 0; c < nc; c++) {
-				const sc = t.h * rng.range(0.15, 0.23);
-				const ang = (c / nc) * Math.PI * 2;
-				const off = c === 0 ? 0 : t.h * rng.range(0.1, 0.17);
-				const p = top.clone().add(new THREE.Vector3(Math.cos(ang) * off, rng.range(-0.06, 0.08) * t.h, Math.sin(ang) * off));
-				canopies.push({ m: new THREE.Matrix4().compose(p, this.q.clone(), new THREE.Vector3(sc, sc * 0.75, sc)), c: color });
 			}
 		});
-		this.finishLayer(trunkLayer);
-		const branchLayer = this.makeLayer(chunk, this.geos.branch, this.mats.bark, branches.length, 9999, { shadow: true, name: 'branch' });
-		branches.forEach((m, i) => branchLayer.mesh.setMatrixAt(i, m));
-		this.finishLayer(branchLayer);
-		const canopyLayer = this.makeLayer(chunk, this.geos.canopy, this.mats.canopy, canopies.length, 9999, { shadow: true, name: 'canopy' });
-		canopies.forEach((cp, i) => {
-			canopyLayer.mesh.setMatrixAt(i, cp.m);
-			this.c.setHex(cp.c).offsetHSL(rng.range(-0.02, 0.02), 0, rng.range(-0.06, 0.06));
-			canopyLayer.mesh.setColorAt(i, this.c);
-		});
-		this.finishLayer(canopyLayer);
-		if (vines.length) {
-			const vineMesh = new THREE.Mesh(merge(vines), this.mats.vine);
-			chunk.group.add(vineMesh);
-		}
+		return out;
 	}
 
-	private scatterSmall(chunk: ChunkLike, rng: Random): void {
-		type P = { x: number; y: number; z: number; s: number; yaw: number; c: number };
-		const lists: Record<'mushroom' | 'glow' | 'fern' | 'bush' | 'rock', P[]> = { mushroom: [], glow: [], fern: [], bush: [], rock: [] };
-		const sq = { d: 0, level: 0, dx: 0, dz: 0 };
-		for (let i = 0; i < 320; i++) {
-			const x = chunk.minX + rng.next() * chunk.size;
-			const z = chunk.minZ + rng.next() * chunk.size;
-			if (this.excluded(x, z, -6)) continue;
-			if (this.terrain.waterLevelAt(x, z) > -Infinity) continue;
-			const f = this.terrain.forestAt(x, z);
-			const e = edgeDistance(x, z);
-			const y = this.terrain.heightAt(x, z);
-			const r = rng.next();
-			const yaw = rng.range(0, Math.PI * 2);
-			this.terrain.streamQuery(x, z, sq);
-			const nearStream = sq.d < 20;
-			if (e > 400) {
-				if (r < 0.22) lists.rock.push({ x, y: y - 0.6, z, s: rng.range(2, 7), yaw, c: rng.pick([0x9a94a6, 0x8c8698, 0xb0aabb]) });
-				continue;
-			}
-			if (f > 0.5) {
-				if (r < 0.1) lists.mushroom.push({ x, y, z, s: rng.range(1.2, 3.6), yaw, c: rng.pick([0xe53935, 0xff7043, 0xa1887f, 0xd81b60, 0xffb74d]) });
-				else if (r < 0.14) lists.glow.push({ x, y, z, s: rng.range(1, 2.4), yaw, c: rng.pick([0x5ef2ff, 0xb18cff, 0x7dffb0]) });
-				else if (r < 0.38) lists.fern.push({ x, y: y - 0.1, z, s: rng.range(0.9, 1.8), yaw, c: 0 });
-				else if (r < 0.44) lists.bush.push({ x, y: y - 0.3, z, s: rng.range(2.5, 5), yaw, c: rng.pick([0x2f7d32, 0x388e3c, 0x43a047]) });
-				else if (r < (nearStream ? 0.58 : 0.47)) lists.rock.push({ x, y: y - 0.4, z, s: rng.range(1, 4.5), yaw, c: rng.pick([0x8d9a7a, 0x7f8c74, 0x9e9a8c]) });
-			} else {
-				if (r < 0.025) lists.bush.push({ x, y: y - 0.3, z, s: rng.range(2.5, 5.5), yaw, c: rng.pick([0x5ea845, 0x6abf4b, 0x4f9a3a]) });
-				else if (r < (nearStream ? 0.12 : 0.04)) lists.rock.push({ x, y: y - 0.4, z, s: rng.range(1, 3.5), yaw, c: rng.pick([0xb8b0a0, 0xa9a294, 0xc4bcae]) });
-				else if (r < 0.05) lists.mushroom.push({ x, y, z, s: rng.range(1, 2), yaw, c: rng.pick([0xe53935, 0xffb74d]) });
-			}
+	/** Builds the instanced meshes for one chunk's bucket (hi and optional lo). */
+	buildMeshes(bucket: LayerBucket): { hi: THREE.InstancedMesh; lo: THREE.InstancedMesh | null } {
+		const layer = bucket.layer;
+		let items = bucket.items;
+		if (layer.optional && this.density < 1) {
+			// Deterministic thinning keeps the same plants when the preset changes.
+			items = items.filter((it) => hash2(Math.floor(it.x * 10), Math.floor(it.z * 10), 77) < this.density);
 		}
-		const add = (key: keyof typeof lists, geo: THREE.BufferGeometry, mat: THREE.Material, maxDist: number, shadow: boolean, scaled: boolean) => {
-			const list = lists[key];
-			if (!list.length) return;
-			const layer = this.makeLayer(chunk, geo, mat, list.length, maxDist, { shadow, densityScaled: scaled, name: key });
-			list.forEach((p, i) => {
-				this.q.setFromAxisAngle(this.up, p.yaw);
-				this.v.set(p.x, p.y, p.z);
-				this.s.setScalar(p.s);
-				if (key === 'rock') this.s.set(p.s, p.s * rng.range(0.6, 1.1), p.s * rng.range(0.8, 1.2));
-				layer.mesh.setMatrixAt(i, this.m.compose(this.v, this.q, this.s));
-				if (key !== 'fern') layer.mesh.setColorAt(i, this.c.setHex(p.c));
-				if (key === 'rock' && p.s > 2.2) this.physics.addBall(p.x, p.y + 0.35 * p.s, p.z, 0.72 * Math.min(this.s.x, this.s.y * 1.4, this.s.z));
-				if (key === 'mushroom' && p.s > 2.8) {
-					this.physics.addCylinder(p.x, p.y + p.s * 0.5, p.z, p.s * 0.5, p.s * 0.24, { kind: 'static', material: 'plant' });
-					this.physics.addCylinder(p.x, p.y + p.s * 1.05, p.z, p.s * 0.2, p.s * 0.8, { kind: 'bouncy', material: 'soft' });
-				}
-			});
-			this.finishLayer(layer);
+		const make = (geo: THREE.BufferGeometry, mat: THREE.Material, shadow: boolean) => {
+			const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, items.length));
+			mesh.count = items.length;
+			for (let i = 0; i < items.length; i++) {
+				const it = items[i];
+				_p.set(it.x, it.y, it.z);
+				_q.setFromEuler(_e.set(it.rx, it.ry, it.rz, 'YXZ'));
+				_s.setScalar(it.s);
+				mesh.setMatrixAt(i, _m.compose(_p, _q, _s));
+			}
+			mesh.instanceMatrix.needsUpdate = true;
+			mesh.castShadow = shadow;
+			mesh.receiveShadow = !shadow || layer.id === 'rock' || layer.id === 'mossRock';
+			mesh.computeBoundingSphere();
+			mesh.name = layer.id;
+			return mesh;
 		};
-		add('mushroom', this.geos.mushroom, this.mats.tint, 170, false, true);
-		add('glow', this.geos.glow, this.mats.glow, 220, false, false);
-		add('fern', this.geos.fern, this.mats.fern, 160, false, true);
-		add('bush', this.geos.bush, this.mats.tint, 240, false, false);
-		add('rock', this.geos.rock, this.mats.rock, 230, false, false);
-	}
-
-	/** Called on contact: makes a flower wobble in the push direction. */
-	touchFlower(f: FlowerRef, dirX: number, dirZ: number, strength: number): void {
-		const len = Math.hypot(dirX, dirZ) || 1;
-		f.wobbleX = dirX / len;
-		f.wobbleZ = dirZ / len;
-		f.wobble = Math.min(1.6, Math.max(f.wobble, strength));
-		this.wobbling.add(f);
-	}
-
-	hideFlower(f: FlowerRef, time: number, respawnDelay: number): void {
-		f.hidden = true;
-		f.respawnAt = time + respawnDelay;
-		this.m.copy(f.matrix);
-		this.m.scale(this.v.setScalar(0.0001));
-		f.layer.mesh.setMatrixAt(f.index, this.m);
-		f.layer.mesh.instanceMatrix.needsUpdate = true;
-		this.wobbling.add(f);
-	}
-
-	isFlowerVisible(f: FlowerRef): boolean {
-		return !f.hidden && f.index < f.layer.mesh.count;
-	}
-
-	update(dt: number, time: number): void {
-		for (const f of this.wobbling) {
-			if (f.hidden) {
-				if (time > f.respawnAt) {
-					f.hidden = false;
-					f.pollen = 1;
-					f.layer.mesh.setMatrixAt(f.index, f.matrix);
-					f.layer.mesh.instanceMatrix.needsUpdate = true;
-				} else continue;
-			}
-			f.wobble *= Math.exp(-2.6 * dt);
-			if (f.hitCooldown > 0) f.hitCooldown -= dt;
-			const attr = f.layer.wobble;
-			if (attr) {
-				attr.setXYZ(f.index, f.wobbleX, f.wobbleZ, f.wobble);
-				attr.needsUpdate = true;
-			}
-			if (f.wobble < 0.01 && f.hitCooldown <= 0) {
-				f.wobble = 0;
-				if (attr) attr.setXYZ(f.index, 0, 0, 0);
-				this.wobbling.delete(f);
-			}
-		}
-	}
-
-	setDensity(d: number, chunks: ChunkLike[]): void {
-		this.density = d;
-		for (const ch of chunks) {
-			for (const l of ch.layers) if (l.densityScaled) l.mesh.count = Math.max(0, Math.floor(l.total * d));
-		}
+		const hi = make(layer.geo, layer.mat, layer.shadow);
+		const lo = layer.lo ? make(layer.lo.geo, layer.lo.mat, false) : null;
+		return { hi, lo };
 	}
 
 	dispose(): void {
-		for (const g of Object.values(this.geos)) g.dispose();
-		for (const m of Object.values(this.mats)) m.dispose();
-		for (const s of this.shapes.values()) s.geo.dispose();
-		for (const m of this.flowerMats.values()) m.dispose();
+		for (const g of this.geometries) g.dispose();
+		for (const m of this.materials) m.dispose();
 	}
 }
+

@@ -7,9 +7,10 @@ export type Rapier = typeof RAPIER_NS;
 /** Collision group bits. Membership in the high 16 bits, filter in the low 16 bits. */
 export const G = {
 	PLAYER: 1 << 0,
-	PROP: 1 << 1,
+	ENEMY: 1 << 1,
 	STATIC: 1 << 2,
-	HELD: 1 << 3
+	BARRIER: 1 << 3,
+	QUERY: 1 << 4
 } as const;
 
 export function groups(membership: number, filter: number): number {
@@ -17,24 +18,27 @@ export function groups(membership: number, filter: number): number {
 }
 
 export const GROUPS = {
-	player: groups(G.PLAYER, G.PROP | G.STATIC),
-	prop: groups(G.PROP, G.PLAYER | G.PROP | G.STATIC | G.HELD),
-	held: groups(G.HELD, G.PROP | G.STATIC),
-	static: groups(G.STATIC, G.PLAYER | G.PROP | G.HELD)
+	player: groups(G.PLAYER, G.STATIC | G.ENEMY | G.BARRIER),
+	enemy: groups(G.ENEMY, G.STATIC | G.PLAYER | G.ENEMY | G.BARRIER),
+	/** Enemies ignore each other in the character controller (separation steering handles crowding). */
+	enemyMove: groups(G.ENEMY, G.STATIC | G.PLAYER | G.BARRIER),
+	static: groups(G.STATIC, G.PLAYER | G.ENEMY | G.QUERY),
+	barrier: groups(G.BARRIER, G.PLAYER | G.ENEMY | G.QUERY)
 };
 
-export type ColliderKind = 'terrain' | 'static' | 'prop' | 'player' | 'bouncy';
+export type ColliderKind = 'terrain' | 'static' | 'player' | 'enemy' | 'barrier';
 
 export interface ColliderTag {
 	kind: ColliderKind;
-	/** Optional owner object (e.g. a Prop instance). */
+	/** Optional owner object (e.g. an Enemy instance). */
 	ref?: unknown;
 	/** Surface sound flavour. */
-	material?: 'wood' | 'stone' | 'wax' | 'plant' | 'soft';
+	material?: 'wood' | 'stone' | 'plant' | 'soft';
 }
 
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
+const _d = new THREE.Vector3();
 
 /** Thin wrapper over a Rapier world: fixed timestep, collider tagging and static-collider helpers. */
 export class PhysicsWorld {
@@ -44,7 +48,7 @@ export class PhysicsWorld {
 	private tags = new Map<number, ColliderTag>();
 
 	private constructor(readonly R: Rapier) {
-		this.world = new R.World({ x: 0, y: -22, z: 0 });
+		this.world = new R.World({ x: 0, y: -30, z: 0 });
 		this.world.timestep = this.fixedDt;
 		this.events = new R.EventQueue(true);
 	}
@@ -74,7 +78,6 @@ export class PhysicsWorld {
 
 	private finishStatic(desc: RAPIER_NS.ColliderDesc, tag: ColliderTag, restitution = 0.2, friction = 0.8): Collider {
 		desc.setCollisionGroups(GROUPS.static).setSolverGroups(GROUPS.static).setRestitution(restitution).setFriction(friction);
-		if (tag.kind === 'bouncy') desc.setActiveEvents(this.R.ActiveEvents.COLLISION_EVENTS);
 		const c = this.world.createCollider(desc);
 		this.tag(c, tag);
 		return c;
@@ -143,16 +146,12 @@ export class PhysicsWorld {
 		return this.finishStatic(desc, tag);
 	}
 
-	addTrimesh(vertices: Float32Array, indices: Uint32Array, tag: ColliderTag = { kind: 'static', material: 'wax' }): Collider {
+	addTrimesh(vertices: Float32Array, indices: Uint32Array, tag: ColliderTag = { kind: 'static', material: 'stone' }): Collider {
 		const desc = this.R.ColliderDesc.trimesh(vertices, indices);
 		return this.finishStatic(desc, tag, 0.15, 0.6);
 	}
 
-	/**
-	 * Ray cast against static world geometry only (camera collision, ground probes).
-	 * Returns hit distance or -1.
-	 */
-	castStatic(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number): number {
+	private setRay(origin: THREE.Vector3, dir: THREE.Vector3): RAPIER_NS.Ray {
 		const ray = this.ray;
 		ray.origin.x = origin.x;
 		ray.origin.y = origin.y;
@@ -160,8 +159,56 @@ export class PhysicsWorld {
 		ray.dir.x = dir.x;
 		ray.dir.y = dir.y;
 		ray.dir.z = dir.z;
-		const hit = this.world.castRay(ray, maxDist, true, undefined, groups(G.HELD, G.STATIC));
+		return ray;
+	}
+
+	/**
+	 * Ray cast against static world geometry (terrain, architecture, trees), optionally also
+	 * magic barriers. Returns hit distance or -1.
+	 */
+	castStatic(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number, barriers = false): number {
+		const hit = this.world.castRay(this.setRay(origin, dir), maxDist, true, undefined, groups(G.QUERY, G.STATIC | (barriers ? G.BARRIER : 0)));
 		return hit ? hit.timeOfImpact : -1;
+	}
+
+	/** Like castStatic but also writes the surface normal. */
+	castStaticNormal(origin: THREE.Vector3, dir: THREE.Vector3, maxDist: number, normal: THREE.Vector3, barriers = true): number {
+		const hit = this.world.castRayAndGetNormal(this.setRay(origin, dir), maxDist, true, undefined, groups(G.QUERY, G.STATIC | (barriers ? G.BARRIER : 0)));
+		if (!hit) return -1;
+		normal.set(hit.normal.x, hit.normal.y, hit.normal.z);
+		return hit.timeOfImpact;
+	}
+
+	/** True when the segment a→b is unobstructed by static geometry (line of sight). */
+	lineOfSight(a: THREE.Vector3, b: THREE.Vector3): boolean {
+		_d.subVectors(b, a);
+		const len = _d.length();
+		if (len < 0.01) return true;
+		_d.multiplyScalar(1 / len);
+		return this.castStatic(a, _d, len - 0.05, true) < 0;
+	}
+
+	/** Kinematic capsule body for characters (player, enemies). Position is the capsule centre. */
+	createCharacter(x: number, y: number, z: number, radius: number, halfHeight: number, group: number, tag: ColliderTag): { body: RigidBody; collider: Collider } {
+		const body = this.world.createRigidBody(this.R.RigidBodyDesc.kinematicPositionBased().setTranslation(x, y, z));
+		const desc = this.R.ColliderDesc.capsule(halfHeight, radius).setCollisionGroups(group).setSolverGroups(group).setFriction(0);
+		const collider = this.world.createCollider(desc, body);
+		this.tag(collider, tag);
+		return { body, collider };
+	}
+
+	/** A removable static wall that blocks players and enemies (magic seals, arena barrier). */
+	addBarrier(x: number, y: number, z: number, hx: number, hy: number, hz: number, ry = 0): Collider {
+		const desc = this.R.ColliderDesc.cuboid(hx, hy, hz).setTranslation(x, y, z).setCollisionGroups(GROUPS.barrier).setSolverGroups(GROUPS.barrier);
+		this.rot(desc, 0, ry, 0);
+		const c = this.world.createCollider(desc);
+		this.tag(c, { kind: 'barrier', material: 'stone' });
+		return c;
+	}
+
+	removeCollider(c: Collider): void {
+		this.untag(c);
+		this.world.removeCollider(c, false);
 	}
 
 	private _ray?: RAPIER_NS.Ray;

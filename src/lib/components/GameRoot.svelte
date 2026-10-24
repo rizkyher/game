@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { Game } from '../game/core/Game';
+	import type { PanelId } from '../game/core/types';
 	import { UIState } from './uiState.svelte';
 	import LoadingScreen from './LoadingScreen.svelte';
 	import MainMenu from './MainMenu.svelte';
@@ -8,37 +9,41 @@
 	import PauseMenu from './PauseMenu.svelte';
 	import SettingsPanel from './SettingsPanel.svelte';
 	import ControlsPanel from './ControlsPanel.svelte';
-	import ProgressPanel from './ProgressPanel.svelte';
+	import CharacterPanel from './CharacterPanel.svelte';
+	import SkillTreePanel from './SkillTreePanel.svelte';
 	import WorldMap from './WorldMap.svelte';
+	import DialogueBox from './DialogueBox.svelte';
+	import GameOver from './GameOver.svelte';
+	import Victory from './Victory.svelte';
 	import Notifications from './Notifications.svelte';
-
-	type Panel = 'none' | 'settings' | 'controls' | 'progress';
 
 	const ui = new UIState();
 	let canvas: HTMLCanvasElement;
 	let popupLayer: HTMLDivElement;
 	let game = $state<Game | null>(null);
-	let panel = $state<Panel>('none');
 	let error = $state('');
+	/** Panels opened from the main menu (no game session yet). */
+	let menuPanel = $state<'settings' | 'controls' | null>(null);
+	let hasSave = $state(false);
 
 	onMount(() => {
 		let disposed = false;
 		let instance: Game | null = null;
 		const probe = document.createElement('canvas');
 		if (!probe.getContext('webgl2')) {
-			error = 'Your browser does not support WebGL 2, which Buzz Mayhem needs to render the world.';
+			error = 'Your browser does not support WebGL 2, which Aetherfall needs to render its world.';
 			return;
 		}
 		(async () => {
 			try {
-				// Three.js + Rapier are loaded only in the browser, never during SSR.
+				// Three.js + Rapier load only in the browser, never during SSR/prerender.
 				const { Game } = await import('../game/core/Game');
 				if (disposed) return;
 				instance = new Game(canvas, popupLayer, ui);
 				game = instance;
-				// Dev-only handle for debugging in the console.
-				if (import.meta.env.DEV) (window as unknown as { __game: Game }).__game = instance;
+				(window as unknown as { __game: Game }).__game = instance;
 				await instance.init();
+				hasSave = instance.hasSave();
 			} catch (e) {
 				console.error(e);
 				error = e instanceof Error ? e.message : String(e);
@@ -51,72 +56,80 @@
 		};
 	});
 
-	function open(p: Panel) {
-		panel = p;
+	function open(p: PanelId) {
+		game?.openPanel(p);
 	}
 
-	function play() {
-		panel = 'none';
-		game?.start();
-	}
-
-	function resume() {
-		panel = 'none';
-		game?.resume();
-	}
-
-	function onKeydown(e: KeyboardEvent) {
-		if (e.code !== 'Escape') return;
-		if (panel !== 'none') {
-			panel = 'none';
-			e.preventDefault();
-		} else if (ui.mapOpen) ui.toggleMap(false);
-		// Some browsers also deliver the Esc that released pointer lock; don't bounce straight back.
-		else if (ui.mode === 'paused' && performance.now() - ui.modeChangedAt > 500) resume();
+	function closePanel() {
+		game?.closePanel();
 	}
 </script>
 
-<svelte:window onkeydown={onKeydown} />
-
-<div class="fixed inset-0 overflow-hidden">
+<div class="fixed inset-0 overflow-hidden bg-ink-950">
 	<canvas bind:this={canvas} class="block h-full w-full outline-none" onclick={() => game?.capture()}></canvas>
 	<div bind:this={popupLayer} class="pointer-events-none absolute inset-0 overflow-hidden"></div>
 
-	{#if ui.mode === 'playing'}
+	{#if ui.mode === 'playing' || ui.mode === 'cutscene' || ui.mode === 'dead'}
 		<Hud {ui} />
-		{#if !ui.locked && !ui.gamepad}
-			<button
-				class="absolute inset-0 flex cursor-pointer items-center justify-center bg-black/25 text-white"
-				onclick={() => game?.capture()}
-			>
-				<span class="bm-panel px-8 py-5 text-center text-xl font-black">
-					🖱️ Click to fly
-					<span class="mt-1 block text-sm font-bold opacity-70">Your mouse will be captured · press Esc to release it</span>
+		{#if ui.mode === 'playing' && !ui.locked && !ui.gamepad}
+			<button class="absolute inset-0 z-10 grid cursor-pointer place-items-center bg-ink-950/30" onclick={() => game?.capture()}>
+				<span class="af-panel px-8 py-5 text-center">
+					<span class="af-title block text-2xl">Click to resume</span>
+					<span class="mt-1 block text-base text-gold-400 italic">Your mouse will be captured for aiming · Esc releases it</span>
 				</span>
 			</button>
 		{/if}
 	{/if}
 
-	{#if ui.mapOpen && game}
-		<WorldMap {game} onclose={() => ui.toggleMap(false)} />
-	{/if}
-
 	<Notifications {ui} />
 
-	{#if ui.mode === 'menu' && panel === 'none'}
-		<MainMenu {game} onplay={play} onopen={open} />
+	{#if ui.mode === 'menu' && game}
+		{#if menuPanel === 'settings'}
+			<SettingsPanel {game} onclose={() => (menuPanel = null)} />
+		{:else if menuPanel === 'controls'}
+			<ControlsPanel onclose={() => (menuPanel = null)} />
+		{:else}
+			<MainMenu
+				{hasSave}
+				onnew={() => game?.newGame()}
+				oncontinue={() => game?.continueGame()}
+				onsettings={() => (menuPanel = 'settings')}
+				oncontrols={() => (menuPanel = 'controls')}
+			/>
+		{/if}
 	{/if}
 
-	{#if ui.mode === 'paused' && panel === 'none' && game}
-		<PauseMenu {game} onresume={resume} onopen={open} />
+	{#if ui.mode === 'paused' && game && !ui.panel}
+		<PauseMenu onresume={() => game?.resume()} onopen={open} onsave={() => game?.saveGame() ?? false} onquit={() => {
+			game?.quitToMenu();
+			hasSave = game?.hasSave() ?? false;
+		}} />
 	{/if}
 
-	{#if panel === 'settings' && game}
-		<SettingsPanel {game} onclose={() => (panel = 'none')} />
-	{:else if panel === 'controls'}
-		<ControlsPanel onclose={() => (panel = 'none')} />
-	{:else if panel === 'progress' && game}
-		<ProgressPanel {game} onclose={() => (panel = 'none')} />
+	{#if game && ui.panel}
+		{#if ui.panel === 'settings'}
+			<SettingsPanel {game} onclose={closePanel} />
+		{:else if ui.panel === 'controls'}
+			<ControlsPanel onclose={closePanel} />
+		{:else if ui.panel === 'character'}
+			<CharacterPanel {game} {ui} onclose={closePanel} />
+		{:else if ui.panel === 'skills'}
+			<SkillTreePanel {game} {ui} onclose={closePanel} />
+		{:else if ui.panel === 'map'}
+			<WorldMap {game} onclose={closePanel} />
+		{/if}
+	{/if}
+
+	{#if ui.mode === 'dialogue' && ui.dialogue && game}
+		<DialogueBox d={ui.dialogue} onnext={() => game?.advanceDialogue()} onchoose={(id) => game?.chooseDialogue(id)} />
+	{/if}
+
+	{#if ui.mode === 'dead' && game}
+		<GameOver onrespawn={() => game?.respawn()} onquit={() => game?.quitToMenu()} />
+	{/if}
+
+	{#if ui.mode === 'victory' && game}
+		<Victory stats={game.getStats()} oncontinue={() => game?.closeVictory()} />
 	{/if}
 
 	{#if ui.mode === 'loading' || error}

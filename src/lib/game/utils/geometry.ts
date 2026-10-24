@@ -5,10 +5,11 @@ import { Noise2D } from './Noise';
 const _color = new THREE.Color();
 
 /**
- * Normalises a geometry for merging: indexed, position + normal + color + aTint only.
- * The colour is baked into a vertex-colour attribute so many parts can share one material.
+ * Normalises a geometry for merging: indexed, position + normal + color + aGlow only.
+ * The colour is baked into a vertex-colour attribute so many parts can share one material;
+ * aGlow (0..1) marks emissive vertices for glowMaterial.
  */
-export function prep(geo: THREE.BufferGeometry, color?: THREE.ColorRepresentation, tint = 0): THREE.BufferGeometry {
+export function prep(geo: THREE.BufferGeometry, color?: THREE.ColorRepresentation, glow = 0): THREE.BufferGeometry {
 	let g = geo;
 	if (!g.index) {
 		g = mergeVerticesSafe(g);
@@ -16,8 +17,7 @@ export function prep(geo: THREE.BufferGeometry, color?: THREE.ColorRepresentatio
 	for (const name of Object.keys(g.attributes)) {
 		if (name !== 'position' && name !== 'normal' && name !== 'color') g.deleteAttribute(name);
 	}
-	// aTint = 1 marks vertices that take the per-instance colour (petals, caps); 0 keeps the baked colour.
-	g.setAttribute('aTint', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count).fill(tint), 1));
+	g.setAttribute('aGlow', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count).fill(glow), 1));
 	if (!g.attributes.normal) g.computeVertexNormals();
 	if (color !== undefined || !g.attributes.color) {
 		_color.set(color ?? 0xffffff);

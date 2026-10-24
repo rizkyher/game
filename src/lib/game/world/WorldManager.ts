@@ -1,212 +1,181 @@
 import * as THREE from 'three';
 import type { PhysicsWorld } from '../physics/PhysicsWorld';
-import { Terrain } from './TerrainGenerator';
-import { Sky } from './Sky';
+import { Terrain } from './Terrain';
+import { Sky, SUN_DIR } from './Sky';
 import { Vegetation } from './Vegetation';
 import { ChunkManager } from './ChunkManager';
 import { Water } from './Water';
-import { Hive } from './Hive';
-import { Features } from './Features';
-import { grassGeometry, grassMaterial, windUniforms } from './Materials';
-import { HIVE, LANDMARKS, REGION_NAMES, WORLD_HALF, WORLD_SEED, WORLD_SIZE, HIVE_CHAMBERS, isInsideHive, regionAt, type RegionId } from './Biomes';
-import { Noise2D } from '../utils/Noise';
-import { smoothstep } from '../utils/math';
+import { Structures } from './Structures';
+import { Ambience } from './Ambience';
+import { grassGeometry, grassMaterial, worldUniforms } from './Materials';
+import { GRID, REGIONS, WORLD_HALF, regionAt, regionWeights, type RegionId, type RegionWeights } from './WorldLayout';
 
-export interface GrassQuality {
-	blades: number;
-	area: number;
-}
+const yieldFrame = () => new Promise((r) => setTimeout(r, 0));
+const _c = new THREE.Color();
 
-const MAX_BLADES = 46000;
-
-/** Builds and owns the static world: terrain, sky, vegetation chunks, water, hive and landmarks. */
+/**
+ * Owns everything static about the world: terrain (render + physics heightfield), sky and
+ * atmosphere, streamed vegetation chunks, water, architecture and ambient effects.
+ */
 export class WorldManager {
-	terrain!: Terrain;
-	sky!: Sky;
-	vegetation!: Vegetation;
-	chunks!: ChunkManager;
-	water!: Water;
-	hive!: Hive;
-	features!: Features;
-	grass!: THREE.Mesh;
-	readonly wind = new THREE.Vector2(0.6, 0.2);
-	/** 0..1 envelope of the current strong gust. */
-	gust = 0;
-	readonly gustDir = new THREE.Vector2(1, 0);
-	private gustTimer = 18;
-	private gustTime = 0;
-	private windNoise = new Noise2D(WORLD_SEED + 99);
-	private dataTex!: THREE.DataTexture;
-	private grassUniforms!: { uCenter: { value: THREE.Vector2 }; uPlayer: { value: THREE.Vector3 }; uArea: { value: number }; uRadius: { value: number } };
+	readonly terrain: Terrain;
+	readonly sky: Sky;
+	readonly vegetation: Vegetation;
+	readonly chunks: ChunkManager;
+	readonly water: Water;
+	readonly structures: Structures;
+	readonly ambience: Ambience;
+	readonly grass: THREE.Mesh;
+	private grassMat: THREE.MeshLambertMaterial;
+	private dataTex: THREE.DataTexture;
+	readonly weights: RegionWeights = { hollow: 0, vale: 1, forest: 0, highlands: 0, sanctuary: 0 };
+	region: RegionId = 'vale';
+	private regionTimer = 0;
+	private grassBlades = 32000;
+	private grassArea = 84;
 
-	private constructor(readonly scene: THREE.Scene) {}
-
-	/** Builds the world in phases, yielding between them so the loading screen can repaint. */
-	static async create(scene: THREE.Scene, physics: PhysicsWorld, progress: (t: number, label: string) => void): Promise<WorldManager> {
-		const w = new WorldManager(scene);
-		const tick = () => new Promise((r) => setTimeout(r, 0));
-		progress(0.12, 'Sculpting hills');
-		await tick();
-		w.terrain = new Terrain(WORLD_SEED);
-		const hf = w.terrain.heightfieldData();
-		physics.addHeightfield(hf.nrows, hf.ncols, hf.heights, hf.scale);
-		w.sky = new Sky(scene);
-
-		progress(0.25, 'Growing flowers & trees');
-		await tick();
-		w.vegetation = new Vegetation(w.terrain, physics);
-		w.chunks = new ChunkManager(w.terrain, w.vegetation);
-		scene.add(w.chunks.root);
-
-		progress(0.66, 'Filling the pond');
-		await tick();
-		w.water = new Water(w.terrain, physics);
-		scene.add(w.water.group);
-
-		progress(0.72, 'Building the hive');
-		await tick();
-		w.hive = new Hive(physics);
-		scene.add(w.hive.group);
-
-		progress(0.78, 'Hiding secrets');
-		await tick();
-		w.features = new Features(w.terrain, physics, w.vegetation, w.chunks);
-		scene.add(w.features.group);
-
-		w.dataTex = w.terrain.createDataTexture();
-		const mat = grassMaterial(w.dataTex);
-		w.grassUniforms = mat.userData.uniforms;
-		w.grass = new THREE.Mesh(grassGeometry(MAX_BLADES, 92, WORLD_SEED), mat);
-		w.grass.frustumCulled = false;
-		w.grass.receiveShadow = true;
-		scene.add(w.grass);
-		return w;
+	private constructor(
+		private scene: THREE.Scene,
+		physics: PhysicsWorld,
+		terrain: Terrain,
+		sky: Sky,
+		vegetation: Vegetation,
+		chunks: ChunkManager,
+		water: Water,
+		structures: Structures
+	) {
+		this.terrain = terrain;
+		this.sky = sky;
+		this.vegetation = vegetation;
+		this.chunks = chunks;
+		this.water = water;
+		this.structures = structures;
+		this.dataTex = terrain.createDataTexture();
+		this.grassMat = grassMaterial(this.dataTex);
+		this.grass = new THREE.Mesh(grassGeometry(this.grassBlades, this.grassArea, 99), this.grassMat);
+		this.grass.frustumCulled = false;
+		this.grass.receiveShadow = true;
+		this.grass.name = 'grass';
+		this.ambience = new Ambience(terrain);
+		scene.add(chunks.root, water.group, structures.root, this.grass, this.ambience.motes, this.ambience.shafts);
+		void physics;
 	}
 
-	setGrassQuality(q: GrassQuality): void {
-		(this.grass.geometry as THREE.InstancedBufferGeometry).instanceCount = Math.min(MAX_BLADES, q.blades);
-		this.grassUniforms.uArea.value = q.area;
-		this.grassUniforms.uRadius.value = q.area / 2;
-		this.grass.visible = q.blades > 0;
+	static async create(scene: THREE.Scene, physics: PhysicsWorld, onProgress: (t: number, label: string) => void): Promise<WorldManager> {
+		onProgress(0.08, 'Shaping the land of Aetherfall');
+		await yieldFrame();
+		const terrain = new Terrain(1337);
+		const hf = terrain.heightfieldData();
+		physics.addHeightfield(hf.nrows, hf.ncols, hf.heights, hf.scale);
+		onProgress(0.2, 'Kindling the sky');
+		await yieldFrame();
+		const sky = new Sky(scene);
+		onProgress(0.26, 'Raising ancient ruins');
+		await yieldFrame();
+		const structures = new Structures(physics, terrain);
+		onProgress(0.36, 'Growing the Eldergrove');
+		await yieldFrame();
+		const vegetation = new Vegetation(terrain, physics);
+		const chunks = new ChunkManager(terrain, vegetation);
+		onProgress(0.48, 'Filling rivers and the Moonwell');
+		await yieldFrame();
+		const water = new Water(terrain, SUN_DIR, sky.fogColor);
+		return new WorldManager(scene, physics, terrain, sky, vegetation, chunks, water, structures);
+	}
+
+	setGrassQuality(blades: number, area: number): void {
+		if (blades === this.grassBlades && area === this.grassArea) return;
+		this.grassBlades = blades;
+		this.grassArea = area;
+		this.grass.geometry.dispose();
+		this.grass.geometry = grassGeometry(blades, area, 99);
+		const u = this.grassMat.userData.uniforms;
+		u.uArea.value = area;
+		u.uRadius.value = area / 2;
 	}
 
 	setDrawDistance(d: number): void {
 		this.chunks.drawDistance = d;
+		this.chunks.lodDistance = Math.min(220, d * 0.42);
 		this.sky.setDrawDistance(d);
 	}
 
-	/** Region with hive interior awareness. */
-	regionAt(p: THREE.Vector3): RegionId {
-		return regionAt(p.x, p.y, p.z);
+	setVegetationDensity(k: number): void {
+		if (this.vegetation.density === k) return;
+		this.vegetation.density = k;
+		this.chunks.rebuildVegetation();
 	}
 
 	regionName(p: THREE.Vector3): string {
-		if (isInsideHive(p.x, p.y, p.z)) {
-			const h = p.y - HIVE.baseY;
-			const ch = HIVE_CHAMBERS.find((c) => h >= c.min && h < c.max);
-			return ch ? ch.name : REGION_NAMES.hive;
-		}
-		return REGION_NAMES[this.regionAt(p)];
+		return REGIONS[regionAt(p.x, p.z)].name;
 	}
 
-	hiveChamberAt(p: THREE.Vector3): string | null {
-		if (!isInsideHive(p.x, p.y, p.z)) return null;
-		const h = p.y - HIVE.baseY;
-		const ch = HIVE_CHAMBERS.find((c) => h >= c.min && h < c.max);
-		return ch ? ch.id : null;
-	}
-
-	update(dt: number, time: number, camera: THREE.Camera, player: THREE.Vector3): void {
-		// Wind: slowly wandering breeze plus occasional strong gusts.
-		const wa = this.windNoise.noise(time * 0.02, 3) * Math.PI;
-		const ws = 0.55 + 0.3 * this.windNoise.noise(time * 0.05, 9);
-		this.gustTimer -= dt;
-		if (this.gustTimer <= 0 && this.gustTime <= 0) {
-			this.gustTime = 4;
-			this.gustTimer = 20 + (Math.sin(time * 1.7) * 0.5 + 0.5) * 18;
-			this.gustDir.set(Math.cos(wa), Math.sin(wa));
-		}
-		if (this.gustTime > 0) {
-			this.gustTime -= dt;
-			const t = 4 - this.gustTime;
-			this.gust = smoothstep(0, 0.8, t) * (1 - smoothstep(2.8, 4, t));
-		} else this.gust = 0;
-		this.wind.set(Math.cos(wa), Math.sin(wa)).multiplyScalar(ws + this.gust * 1.4);
-		windUniforms.uTime.value = time;
-		windUniforms.uWind.value.copy(this.wind);
-
-		this.sky.update(dt, time, player, camera);
+	update(dt: number, time: number, camera: THREE.Camera, focus: THREE.Vector3): void {
+		worldUniforms.uTime.value = time;
+		worldUniforms.uPlayer.value.copy(focus);
+		const w = worldUniforms.uWind.value;
+		w.set(0.45 + Math.sin(time * 0.13) * 0.25, 0.22 + Math.cos(time * 0.09) * 0.15);
+		const u = this.grassMat.userData.uniforms;
+		u.uCenter.value.set(camera.position.x, camera.position.z);
 		this.chunks.update(dt, camera.position);
-		this.vegetation.update(dt, time);
-		this.grassUniforms.uCenter.value.set(player.x, player.z);
-		this.grassUniforms.uPlayer.value.copy(player);
-
-		// Interior streaming: hive interior details + lights only near the hive.
-		const hd = Math.hypot(player.x - HIVE.x, player.z - HIVE.z);
-		this.hive.interior.visible = hd < 170;
-		this.hive.setLightLevel(1 - smoothstep(80, 150, hd));
+		this.regionTimer -= dt;
+		if (this.regionTimer <= 0) {
+			this.regionTimer = 0.2;
+			regionWeights(focus.x, focus.z, this.weights);
+			this.region = regionAt(focus.x, focus.z);
+		}
+		this.sky.applyRegions(this.weights, dt);
+		this.sky.update(time, focus, camera);
+		this.structures.update(time, camera.position, this.chunks.drawDistance);
+		_c.setHex(REGIONS[this.region].motes);
+		this.ambience.update(camera.position, this.terrain.heightAt(camera.position.x, camera.position.z), _c, this.sky.gloom);
 	}
 
-	/** Small top-down colour map for the world map overlay. */
-	buildMapCanvas(size = 256): HTMLCanvasElement {
+	/** Top-down shaded map image for the world map. */
+	buildMapCanvas(size: number): HTMLCanvasElement {
 		const canvas = document.createElement('canvas');
-		canvas.width = canvas.height = size;
+		canvas.width = size;
+		canvas.height = size;
 		const ctx = canvas.getContext('2d')!;
 		const img = ctx.createImageData(size, size);
 		const t = this.terrain;
-		for (let j = 0; j < size; j++) {
-			for (let i = 0; i < size; i++) {
-				const x = -WORLD_HALF + ((i + 0.5) / size) * WORLD_SIZE;
-				const z = -WORLD_HALF + ((j + 0.5) / size) * WORLD_SIZE;
-				const h = t.heightAt(x, z);
-				const f = t.forestAt(x, z);
-				let r = 120 - f * 60;
-				let g = 190 - f * 70;
-				let b = 80 - f * 20;
-				const shade = Math.max(-25, Math.min(40, h * 0.9));
-				r += shade;
-				g += shade;
-				b += shade;
-				if (h > 45) {
-					const k = smoothstep(45, 100, h);
-					r = r * (1 - k) + 200 * k;
-					g = g * (1 - k) + 196 * k;
-					b = b * (1 - k) + 214 * k;
-				}
-				if (t.waterLevelAt(x, z) > h) {
-					r = 70;
-					g = 160;
-					b = 220;
-				}
-				if (Math.hypot(x - HIVE.x, z - HIVE.z) < 37) {
-					r = 240;
-					g = 180;
-					b = 60;
-				}
-				const k = (j * size + i) * 4;
-				img.data[k] = r;
-				img.data[k + 1] = g;
-				img.data[k + 2] = b;
-				img.data[k + 3] = 255;
+		const col = new THREE.Color();
+		const n = new THREE.Vector3();
+		const light = new THREE.Vector3(-0.5, 0.75, -0.4).normalize();
+		const V = GRID + 1;
+		for (let py = 0; py < size; py++) {
+			for (let px = 0; px < size; px++) {
+				const x = -WORLD_HALF + ((px + 0.5) / size) * WORLD_HALF * 2;
+				const z = -WORLD_HALF + ((py + 0.5) / size) * WORLD_HALF * 2;
+				const ix = Math.min(GRID, Math.round((x + WORLD_HALF) / 2));
+				const iz = Math.min(GRID, Math.round((z + WORLD_HALF) / 2));
+				t.normalAt(x, z, n);
+				t.colorAt(ix, iz, n.y, col);
+				if (t.water[iz * V + ix]) col.setRGB(0.08, 0.25, 0.4);
+				const shade = 0.55 + Math.max(0, n.dot(light)) * 0.75;
+				col.multiplyScalar(shade);
+				col.convertLinearToSRGB();
+				const i = (py * size + px) * 4;
+				img.data[i] = Math.min(255, col.r * 255);
+				img.data[i + 1] = Math.min(255, col.g * 255);
+				img.data[i + 2] = Math.min(255, col.b * 255);
+				img.data[i + 3] = 255;
 			}
 		}
 		ctx.putImageData(img, 0, 0);
 		return canvas;
 	}
 
-	get landmarks() {
-		return LANDMARKS;
-	}
-
 	dispose(): void {
-		this.sky.dispose();
+		this.scene.remove(this.chunks.root, this.water.group, this.structures.root, this.grass, this.ambience.motes, this.ambience.shafts);
 		this.chunks.dispose();
 		this.vegetation.dispose();
 		this.water.dispose();
-		this.hive.dispose();
-		this.features.dispose();
+		this.structures.dispose();
+		this.ambience.dispose();
 		this.grass.geometry.dispose();
-		(this.grass.material as THREE.Material).dispose();
+		this.grassMat.dispose();
 		this.dataTex.dispose();
+		this.sky.dispose();
 	}
 }

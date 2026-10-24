@@ -1,50 +1,63 @@
 import { DEFAULT_SETTINGS, type Settings } from '../core/Settings';
+import { Progression, type ProgressionData } from './Progression';
+import type { PlayerElement } from '../combat/types';
+
+export interface QuestSave {
+	stage: number;
+	kills: number;
+	crystals: string[];
+	complete: boolean;
+}
 
 export interface SaveData {
 	version: 1;
 	settings: Settings;
-	bestChaos: number;
-	totalChaos: number;
-	honey: number;
-	totalNectar: number;
-	totalPollen: number;
+	/** A character exists (Continue is available). */
+	hasGame: boolean;
+	progression: ProgressionData;
+	inventory: Record<string, number>;
+	element: PlayerElement;
+	quest: QuestSave;
+	waystones: string[];
+	checkpoint: string;
+	opened: string[];
+	lore: string[];
 	discovered: string[];
-	species: string[];
-	orbs: string[];
-	achievements: string[];
-	tricks: string[];
-	challengesDone: string[];
-	raceBest: number | null;
+	cleared: string[];
+	bossDefeated: boolean;
 	playTime: number;
+	deaths: number;
+	savedAt: number;
 }
 
-const KEY = 'buzz-mayhem-save-v1';
+const KEY = 'aetherfall-save-v1';
 
-function fresh(): SaveData {
+export function freshGame(settings: Settings): SaveData {
 	return {
 		version: 1,
-		settings: { ...DEFAULT_SETTINGS },
-		bestChaos: 0,
-		totalChaos: 0,
-		honey: 0,
-		totalNectar: 0,
-		totalPollen: 0,
+		settings: { ...settings },
+		hasGame: false,
+		progression: Progression.fresh(),
+		inventory: { health_potion: 3, mana_potion: 2 },
+		element: 'fire',
+		quest: { stage: 0, kills: 0, crystals: [], complete: false },
+		waystones: ['hollow'],
+		checkpoint: 'hollow',
+		opened: [],
+		lore: [],
 		discovered: [],
-		species: [],
-		orbs: [],
-		achievements: [],
-		tricks: [],
-		challengesDone: [],
-		raceBest: null,
-		playTime: 0
+		cleared: [],
+		bossDefeated: false,
+		playTime: 0,
+		deaths: 0,
+		savedAt: 0
 	};
 }
 
 /** LocalStorage-backed progress. All access is guarded: private mode or full storage just disables saving. */
 export class SaveSystem {
 	data: SaveData;
-	private dirty = false;
-	private timer = 0;
+	available = true;
 
 	constructor() {
 		this.data = this.load();
@@ -53,48 +66,50 @@ export class SaveSystem {
 	private load(): SaveData {
 		try {
 			const raw = localStorage.getItem(KEY);
-			if (!raw) return fresh();
+			if (!raw) return freshGame(DEFAULT_SETTINGS);
 			const parsed = JSON.parse(raw) as Partial<SaveData>;
-			const base = fresh();
-			return { ...base, ...parsed, settings: { ...base.settings, ...(parsed.settings ?? {}) }, version: 1 };
+			const base = freshGame(DEFAULT_SETTINGS);
+			return {
+				...base,
+				...parsed,
+				settings: { ...base.settings, ...(parsed.settings ?? {}) },
+				progression: { ...base.progression, ...(parsed.progression ?? {}) },
+				quest: { ...base.quest, ...(parsed.quest ?? {}) },
+				version: 1
+			};
 		} catch {
-			return fresh();
+			this.available = false;
+			return freshGame(DEFAULT_SETTINGS);
 		}
 	}
 
-	markDirty(): void {
-		this.dirty = true;
-	}
-
-	/** Adds a unique id to a list; returns true when it was new. */
-	addUnique(list: 'discovered' | 'species' | 'orbs' | 'achievements' | 'tricks' | 'challengesDone', id: string): boolean {
-		const arr = this.data[list];
-		if (arr.includes(id)) return false;
-		arr.push(id);
-		this.dirty = true;
-		return true;
-	}
-
-	update(dt: number): void {
-		this.data.playTime += dt;
-		this.timer += dt;
-		if (this.dirty && this.timer > 3) this.flush();
-	}
-
-	flush(): void {
-		this.timer = 0;
-		this.dirty = false;
+	write(): boolean {
+		this.data.savedAt = Date.now();
 		try {
 			localStorage.setItem(KEY, JSON.stringify(this.data));
+			this.available = true;
+			return true;
 		} catch {
-			/* storage unavailable */
+			this.available = false;
+			return false;
 		}
 	}
 
-	reset(): void {
+	/** Persist settings without touching game progress. */
+	writeSettings(s: Settings): void {
+		this.data.settings = { ...s };
+		this.write();
+	}
+
+	newGame(): void {
+		this.data = freshGame(this.data.settings);
+		this.data.hasGame = true;
+		this.write();
+	}
+
+	wipe(): void {
 		const settings = this.data.settings;
-		this.data = fresh();
-		this.data.settings = settings;
-		this.flush();
+		this.data = freshGame(settings);
+		this.write();
 	}
 }
