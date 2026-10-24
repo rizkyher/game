@@ -17,6 +17,18 @@
 		['Mouse wheel', 'Camera zoom'],
 		['Esc / P', 'Pause & release the mouse']
 	];
+	const padRows: [string, string][] = [
+		['Left stick / D-pad', 'Fly'],
+		['Right stick', 'Camera'],
+		['RT · LT', 'Ascend · descend'],
+		['RB', 'Boost'],
+		['A', 'Dash'],
+		['LB', 'Barrel roll'],
+		['X', 'Headbutt / throw'],
+		['B', 'Sting'],
+		['Y', 'Interact'],
+		['Back · Start', 'Map · pause (Start also plays from the menu)']
+	];
 </script>
 
 <div class="absolute inset-0 z-40 flex items-center justify-center bg-bark-900/45 px-4 backdrop-blur-[2px]">
@@ -28,6 +40,17 @@
 		<table class="mt-3 w-full text-sm">
 			<tbody>
 				{#each rows as [key, action] (key)}
+					<tr class="border-b border-bark-800/10">
+						<td class="py-1.5 pr-3 whitespace-nowrap"><kbd class="rounded-md border-2 border-bark-800 bg-white px-1.5 py-0.5 text-xs font-black">{key}</kbd></td>
+						<td class="py-1.5 font-semibold">{action}</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+		<h3 class="mt-4 text-xs font-black tracking-widest opacity-60">GAMEPAD (Xbox layout)</h3>
+		<table class="mt-1 w-full text-sm">
+			<tbody>
+				{#each padRows as [key, action] (key)}
 					<tr class="border-b border-bark-800/10">
 						<td class="py-1.5 pr-3 whitespace-nowrap"><kbd class="rounded-md border-2 border-bark-800 bg-white px-1.5 py-0.5 text-xs font-black">{key}</kbd></td>
 						<td class="py-1.5 font-semibold">{action}</td>

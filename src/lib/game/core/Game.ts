@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { GameContext } from './context';
 import type { GameMode, HudSnapshot, UIBridge } from './types';
 import { GameLoop } from './GameLoop';
-import { InputManager } from './InputManager';
+import { InputManager, PAD } from './InputManager';
 import { CameraController } from './CameraController';
 import { QUALITY_PRESETS, type Settings } from './Settings';
 import { PhysicsWorld } from '../physics/PhysicsWorld';
@@ -168,7 +168,7 @@ export class Game {
 		ctx.cameraCtl.mode = 'follow';
 		ctx.audio.resume();
 		this.setMode('playing');
-		void this.input.requestLock().then((ok) => this.ui.setLocked(ok));
+		if (!this.input.gamepadActive) void this.input.requestLock().then((ok) => this.ui.setLocked(ok));
 	}
 
 	/** A few staggered onboarding hints for first-time players. */
@@ -193,7 +193,7 @@ export class Game {
 		if (this.mode !== 'paused') return;
 		this.ctx.audio.resume();
 		this.setMode('playing');
-		void this.input.requestLock().then((ok) => this.ui.setLocked(ok));
+		if (!this.input.gamepadActive) void this.input.requestLock().then((ok) => this.ui.setLocked(ok));
 	}
 
 	/** Re-capture the mouse while playing (click on canvas). */
@@ -315,6 +315,14 @@ export class Game {
 
 	private frame(dt: number, alpha: number): void {
 		const ctx = this.ctx;
+		this.input.pollGamepad(dt);
+		this.ui.setGamepad(this.input.gamepadActive);
+		if (this.input.padButtonPressed(PAD.START)) {
+			if (this.mode === 'playing') this.pause();
+			else if (this.mode === 'paused') this.resume();
+			else if (this.mode === 'menu') this.start();
+		}
+		if (this.mode === 'playing' && this.input.padButtonPressed(PAD.BACK)) this.ui.toggleMap();
 		if (this.mode === 'paused') {
 			// Keep the paused frame on screen without burning the GPU.
 			this.pauseRender -= dt;

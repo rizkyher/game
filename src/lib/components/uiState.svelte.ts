@@ -41,6 +41,8 @@ export class UIState implements UIBridge {
 	notices = $state<Notice[]>([]);
 	locked = $state(false);
 	mapOpen = $state(false);
+	/** A gamepad is in use, so the click-to-capture-mouse overlay isn't needed. */
+	gamepad = $state(false);
 	/** performance.now() of the last mode change (not reactive). */
 	modeChangedAt = 0;
 	private nextId = 1;
@@ -84,6 +86,10 @@ export class UIState implements UIBridge {
 
 	setLocked(locked: boolean): void {
 		this.locked = locked;
+	}
+
+	setGamepad(active: boolean): void {
+		if (this.gamepad !== active) this.gamepad = active;
 	}
 
 	toggleMap(open?: boolean): void {

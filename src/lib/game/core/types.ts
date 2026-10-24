@@ -41,4 +41,5 @@ export interface UIBridge {
 	notify(title: string, detail?: string, kind?: NoticeKind): void;
 	setLocked(locked: boolean): void;
 	toggleMap(open?: boolean): void;
+	setGamepad(active: boolean): void;
 }

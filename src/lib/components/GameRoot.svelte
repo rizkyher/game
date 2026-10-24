@@ -84,7 +84,7 @@
 
 	{#if ui.mode === 'playing'}
 		<Hud {ui} />
-		{#if !ui.locked}
+		{#if !ui.locked && !ui.gamepad}
 			<button
 				class="absolute inset-0 flex cursor-pointer items-center justify-center bg-black/25 text-white"
 				onclick={() => game?.capture()}

@@ -31,6 +31,8 @@ Requires a WebGL 2 browser. Keyboard and mouse recommended. Click **Play** to ca
 | E · F | Interact (pick up, sip nectar, talk, start activities) · drop |
 | M (or Tab) · Esc (or P) | Map · pause |
 
+**Gamepad** (standard/Xbox layout): left stick fly, right stick camera, RT/LT up/down, RB boost, A dash, LB roll, X headbutt/throw, B sting, Y interact, Back map, Start play/pause.
+
 Since Ctrl is the descend key, the browser asks for confirmation if Ctrl+W or Ctrl+R is pressed mid-flight.
 
 ## What's in the game
@@ -87,7 +89,7 @@ Three.js and Rapier are loaded with a dynamic `import()` inside `onMount`, so SS
 
 ## Known limitations
 
-- Keyboard and mouse only. There are no gamepad or touch controls yet.
+- No touch controls yet (keyboard/mouse and gamepad are supported).
 - Chunks are all generated at load. Streaming is visibility- and LOD-based rather than on-demand generation, and the hive interior detail and lights switch on near the hive.
-- Held objects are kinematic, so they can clip through walls while carried.
+- Held objects are swept against walls and floors, but if the bee itself hugs the ground the object overlaps the bee.
 - Performance was profiled by draw-call and triangle counts in headless Chromium using software rendering (about 350–420 draws including the shadow pass, about 1M triangles on High). It has not yet been measured on Apple Silicon hardware.
