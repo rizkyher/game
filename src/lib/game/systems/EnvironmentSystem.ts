@@ -75,6 +75,11 @@ export class EnvironmentSystem {
 	addStruggle(amount: number, wiggle = true): void {
 		if (!this.stuck) return;
 		this.struggle = Math.min(1, this.struggle + amount);
+		// Check here: the per-step decay would otherwise pull a full meter back under 1.
+		if (this.struggle >= 1) {
+			this.escape();
+			return;
+		}
 		if (!wiggle) return;
 		this.ctx.player.model.bonk(0.15);
 		this.ctx.effects.emit(this.stuck === 'honey' ? 'honey' : 'sparkle', this.ctx.player.position, 2, 0.4);
@@ -193,7 +198,6 @@ export class EnvironmentSystem {
 		if (this.stuck) {
 			this.struggle = Math.max(0, this.struggle - dt * 0.06);
 			this.speedMul = 0.04;
-			if (this.struggle >= 1) this.escape();
 		} else {
 			if (this.wet > 0) this.speedMul *= 0.68;
 			if (this.honeyCoat > 0) this.speedMul *= 0.8;

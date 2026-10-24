@@ -174,7 +174,7 @@ export class BeeAbilities {
 				_hold.y -= 1.1 + (h.def.shape.type === 'ball' ? h.def.shape.r : h.def.shape.type === 'cylinder' ? h.def.shape.hh : 0.8);
 				_hold.x += Math.sin(player.yaw) * 0.4;
 				_hold.z += Math.cos(player.yaw) * 0.4;
-				ctx.props.carry(h, _hold, player.yaw);
+				ctx.props.carry(h, player.position, _hold, player.yaw);
 			}
 		}
 	}

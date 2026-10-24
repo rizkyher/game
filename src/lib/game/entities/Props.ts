@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { RigidBody } from '@dimforge/rapier3d-compat';
 import type { GameContext } from '../core/context';
-import { GROUPS } from '../physics/PhysicsWorld';
+import { G, GROUPS, groups } from '../physics/PhysicsWorld';
 import { propDefs, type PropDef, type PropKind } from './PropDefs';
 import { HIVE, landmark } from '../world/Biomes';
 import { Random } from '../utils/Random';
@@ -70,6 +70,9 @@ const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3(1, 1, 1);
 const _zero = new THREE.Vector3(0, 0, 0);
+const _sweep = new THREE.Vector3();
+const _desired = new THREE.Vector3();
+const STATIC_ONLY = groups(G.HELD, G.STATIC);
 
 /**
  * All dynamic props. Rendering is instanced per kind; physics bodies exist only for props
@@ -507,15 +510,25 @@ export class Props {
 		b.collider(0).setSolverGroups(GROUPS.held);
 	}
 
-	/** Move a held prop (kinematic) each fixed step. */
-	carry(p: Prop, target: THREE.Vector3, yaw: number): void {
+	/**
+	 * Move a held prop (kinematic) each fixed step. Kinematic bodies ignore static geometry,
+	 * so sweep the prop's shape from the bee to the carry point and stop at walls/floors.
+	 */
+	carry(p: Prop, from: THREE.Vector3, target: THREE.Vector3, yaw: number): void {
 		const b = p.body;
 		if (!b) return;
 		p.prevPos.copy(p.pos);
 		p.prevQuat.copy(p.quat);
-		p.pos.lerp(target, 0.5);
 		_q.setFromAxisAngle(_v.set(0, 1, 0), yaw);
 		p.quat.slerp(_q, 0.2);
+		_desired.copy(p.pos).lerp(target, 0.5);
+		_sweep.copy(_desired).sub(from);
+		if (_sweep.lengthSq() > 1e-4) {
+			const col = b.collider(0);
+			const hit = this.ctx.physics.world.castShape(from, p.quat, _sweep, col.shape, 0.05, 1, false, undefined, STATIC_ONLY, col, b);
+			if (hit) _desired.copy(from).addScaledVector(_sweep, Math.max(0, hit.time_of_impact - 0.02));
+		}
+		p.pos.copy(_desired);
 		b.setNextKinematicTranslation({ x: p.pos.x, y: p.pos.y, z: p.pos.z });
 		this.tmpRot.x = p.quat.x;
 		this.tmpRot.y = p.quat.y;
