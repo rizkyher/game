@@ -1,0 +1,14 @@
+{
+	"extends": "$app/tsconfig",
+	"compilerOptions": {
+		"strict": true,
+		// worker-configuration.d.ts imports the built worker (.svelte-kit/cloudflare/_worker.js) for its
+		// types; checking generated JS would report errors in build output, and all sources here are TS.
+		"checkJs": false,
+		"types": [
+			"$app/types",
+			"./worker-configuration.d.ts"
+		]
+	},
+	"include": ["src", "vite.config.ts"]
+}

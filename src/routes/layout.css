@@ -1,0 +1,118 @@
+@import 'tailwindcss';
+
+@theme {
+	--font-game: ui-rounded, 'SF Pro Rounded', 'Nunito', 'Varela Round', 'Arial Rounded MT Bold', system-ui, sans-serif;
+	--color-honey-50: #fff8e1;
+	--color-honey-100: #ffecb3;
+	--color-honey-200: #ffe082;
+	--color-honey-300: #ffd54f;
+	--color-honey-400: #ffca28;
+	--color-honey-500: #ffb300;
+	--color-honey-600: #ff8f00;
+	--color-honey-700: #e65100;
+	--color-bark-800: #3e2a17;
+	--color-bark-900: #2b1d10;
+}
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+	overflow: hidden;
+	background: #9fd3ff;
+	font-family: var(--font-game);
+	-webkit-font-smoothing: antialiased;
+	user-select: none;
+}
+
+.bm-popup {
+	position: absolute;
+	left: 0;
+	top: 0;
+	pointer-events: none;
+	white-space: nowrap;
+	font-weight: 900;
+	font-size: 18px;
+	letter-spacing: 0.02em;
+	will-change: transform, opacity;
+	text-shadow:
+		0 2px 0 rgba(60, 30, 0, 0.55),
+		0 0 10px rgba(0, 0, 0, 0.25);
+}
+.bm-popup-chaos {
+	color: #fff176;
+}
+.bm-popup-combo {
+	color: #ff80ab;
+	font-size: 26px;
+}
+.bm-popup-collect {
+	color: #b9f6ca;
+	font-size: 20px;
+}
+.bm-popup-trick {
+	color: #84ffff;
+}
+.bm-popup-bad {
+	color: #ff8a80;
+	font-size: 22px;
+}
+.bm-popup-speech {
+	color: #3e2a17;
+	background: #fffdf5;
+	border: 2px solid #3e2a17;
+	border-radius: 14px;
+	padding: 4px 10px;
+	font-size: 15px;
+	text-shadow: none;
+	box-shadow: 0 3px 0 rgba(62, 42, 23, 0.35);
+}
+
+.bm-panel {
+	background: linear-gradient(180deg, rgba(255, 251, 235, 0.97), rgba(255, 240, 200, 0.97));
+	border: 3px solid #3e2a17;
+	border-radius: 22px;
+	box-shadow:
+		0 6px 0 #3e2a17,
+		0 20px 50px rgba(0, 0, 0, 0.35);
+	color: #3e2a17;
+}
+
+.bm-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	border: 3px solid #3e2a17;
+	border-radius: 16px;
+	background: linear-gradient(180deg, #ffe066, #ffb300);
+	color: #3e2a17;
+	font-weight: 900;
+	box-shadow: 0 5px 0 #3e2a17;
+	transition:
+		transform 0.08s,
+		box-shadow 0.08s,
+		filter 0.15s;
+	cursor: pointer;
+}
+.bm-btn:hover {
+	filter: brightness(1.06);
+	transform: translateY(-1px);
+}
+.bm-btn:active {
+	transform: translateY(4px);
+	box-shadow: 0 1px 0 #3e2a17;
+}
+.bm-btn-ghost {
+	background: #fffaf0;
+}
+
+.bm-stroke {
+	-webkit-text-stroke: 2px #3e2a17;
+	paint-order: stroke fill;
+}
+
+input[type='range'].bm-range {
+	accent-color: #ff8f00;
+	width: 100%;
+}
