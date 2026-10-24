@@ -138,7 +138,9 @@ export class CombatSystem {
 		const result: HitResult = { damage: 0, crit: false, killed: false, weak: false, blocked: false, parried: false, immune: false, reactions: [] };
 		if (target.invulnerable() && !(hit.tags & HitTag.DOT)) {
 			result.immune = true;
-			if (target.team === 'player') ctx.numbers.spawn(_p.copy(target.position).setY(target.position.y + 2), 'Evaded', 'info');
+			// Only real dodges say so; post-hit mercy frames are silent.
+			const move = (target as unknown as { fsm?: { move: string } }).fsm?.move;
+			if (target.team === 'player' && (move === 'dodge' || move === 'dash')) ctx.numbers.spawn(_p.copy(target.position).setY(target.position.y + 2), 'Evaded', 'info');
 			return null;
 		}
 		// Shield / parry on the player.

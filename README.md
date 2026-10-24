@@ -1,8 +1,8 @@
-# 🐝 Buzz Mayhem
+# Aetherfall: Echoes of the Arcane
 
-A chaotic, physics-driven 3D open-world bee sandbox. You're a tiny cartoon bee in a giant world: fly anywhere, knock things over, annoy the locals, chain tricks into combos, and find secrets. Activities are optional; free roam is the game.
+A third-person open-world magic action RPG that runs in the browser. You play **the Arcanist**, a mage who holds all four elements at once, sent by Elder Mirael to restore the Broken Seal and put down **Azrak, the Crystal Tyrant**.
 
-Built with **SvelteKit 3 + TypeScript**, **Three.js** (rendering), **Rapier 3D** (physics), **Tailwind CSS 4** (menus/HUD) and the **Web Audio API**. Deploys with the **Cloudflare adapter**. All assets are procedural: there are no model, texture or audio files.
+Built with **SvelteKit 3 + TypeScript**, **Three.js** (WebGL 2, bloom post-processing), **Rapier 3D** (character controllers, colliders, ray casts), **Tailwind CSS 4** (HUD and menus) and the **Web Audio API**. It deploys with the Cloudflare adapter. Everything is procedural: there are no model, texture or audio files. Character and enemy visuals sit behind small interfaces, so rigged GLB models can replace them later without touching gameplay.
 
 ## Run it
 
@@ -14,82 +14,148 @@ bun run build      # production build (Cloudflare adapter)
 bun run preview    # serve the build with wrangler
 ```
 
-Requires a WebGL 2 browser. Keyboard and mouse recommended. Click **Play** to capture the mouse; **Esc** releases it and pauses.
+You need a WebGL 2 browser. Keyboard and mouse are recommended, and a gamepad also works. Click **New Journey** to start; the mouse is captured while you play, and **Esc** releases it and pauses. Add `?nolock` to the URL to play without pointer lock (useful in embedded previews and automation).
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| W A S D | Fly (camera-relative) |
-| Mouse / wheel | Orbit camera / zoom |
-| Space · Ctrl (or C) | Ascend · descend |
-| Shift | Boost (uses the boost meter) |
-| Ctrl + Shift | Dive bomb (hitting the ground hard = Ground Pound shockwave) |
-| Q · R | Dash · barrel roll |
-| Left click | Headbutt (or throw what you're holding) |
-| Right click | Sting (pops balloons and puffballs, angers creatures) |
-| E · F | Interact (pick up, sip nectar, talk, start activities) · drop |
-| M (or Tab) · Esc (or P) | Map · pause |
+| W A S D | Move (camera-relative) |
+| Mouse · wheel | Orbit camera · zoom |
+| Shift | Sprint |
+| Space (twice) | Jump · double jump |
+| Q | Dodge roll with i-frames (dash while sprinting or airborne) |
+| Left click | Basic spell (chain three casts for a finisher) |
+| Hold right click | Charge the element's special, release to cast |
+| 1 2 3 4 | Fire · Ice · Lightning · Wind |
+| F (hold) · R | Aegis shield · parry (perfect timing counters) |
+| Tab | Lock on / switch target |
+| X (hold) | Prismatic Ray channel (unlocked by defeating Azrak) |
+| G | Aetherfall ultimate (when the aether gauge is full) |
+| H · J | Healing Draught · Aether Tonic |
+| E | Interact (talk, waystones, caches, crystals, inscriptions, the Seal) |
+| I (or C) · K · M | Character and inventory · skill tree · world map |
+| Esc (or P) | Pause |
 
-**Gamepad** (standard/Xbox layout): left stick fly, right stick camera, RT/LT up/down, RB boost, A dash, LB roll, X headbutt/throw, B sting, Y interact, Back map, Start play/pause.
+**Gamepad** (standard layout): left stick move, right stick camera, RT basic spell, LT charge, A jump, B dodge, RB shield, LB parry, Y ultimate, X interact, D-pad elements, R3 lock-on, L3 sprint, Back map, Start pause.
 
-Since Ctrl is the descend key, the browser asks for confirmation if Ctrl+W or Ctrl+R is pressed mid-flight.
+## The game
 
-## What's in the game
+**World.** One seamless 720 m world built from a fixed seed:
+- **Lumen Hollow**, the lantern-lit starting village (Elder Mirael, Wren the lamplighter, the Lumen Well, an observatory tower and a market).
+- **Whispering Vale** and the Crossroads Watch, where the three roads meet.
+- **The Enchanted Forest (Eldergrove):** glowing mushrooms and flowers, ancient trees, the Shrine of Verdance, a river that ends in Moonwell Falls and its lake, and a Hidden Grotto.
+- **The Arcane Highlands:** a raised plateau with the Ring of Echoes, the Starfall Spire, the climbable Drifting Isles and ruined towers.
+- **The Forgotten Sanctuary**, behind the Seal Gate: the Aether Academy courtyard, the Temple of Dusk, the Sunken Library, the Undercroft (an underground crypt) and the Crystal Throne arena.
 
-**World.** One seamless 1 km² world generated from a fixed seed, so it's the same every run:
-- **Flower Meadow:** daisies, tulips, roses, lavender rows, sunflower grove, dandelions; swaying grass and flowers driven by wind; a lily pond with reeds and floaters; picnic grounds; a gardener's corner; a dirt trail.
-- **Enchanted Forest:** a raised plateau behind a cliff ridge, with giant trees (branches, canopies, hanging vines), mushrooms, ferns, rocks, a stream with a waterfall, the Elder Tree (climb its shelf fungi), the enterable Hollow Oak, a mossy log tunnel, a bouncy fairy ring, and a spider grove with webs.
-- **The Beehive:** a giant straw skep on a tree stump with an arched entrance and four interior floors: Entrance Hall (honey storage cells, sticky honey pool, nectar deposit), Royal Nursery, Wax Workshop, Queen's Chamber, and a secret Royal Attic with an exit at the apex.
-- **Misty Peaks** ring the world as a natural boundary.
-- Sky gradient, fog, sun with texel-snapped shadows, hemisphere light, drifting clouds, gusts and updrafts.
+Each region blends its own fog, light, sky tint, ambient particles and music. Eight waystones act as checkpoints (they heal you, save, and become your respawn point). Caches, relics, lore inscriptions and landmark discoveries reward exploration.
 
-**The bee.** Procedural model with striped body, expressive eyes and lids, brows, mouth, six legs, antennae on springs, four wings and a stinger. Its expressions change with what's happening (determined, surprised, dizzy, worried, angry). Flight is momentum-based, with banking and pitch, wing speed tied to effort, a hover bob, squash and stretch, and a honey or wet tint.
+**The Arcanist.** A jointed procedural mage with robe panels, a spring-driven cape and hair, glowing gauntlets, an amulet and a floating grimoire. The two-layer state machine (movement × action) handles sprinting, coyote-time jumps, a flipping double jump, dodge rolls with invulnerability frames, air and sprint dashes, dash-casting, dodge-cancelling and staggers.
 
-**Chaos (core loop).** 26 dynamic prop types run on Rapier, including cups, a cup pyramid, dominoes, a sugar-cube tower, a jam jar, balloons on strings, cherries and berries that fall when hit, a beach ball, a watering can, a garden gnome, flower pots, honey jars and globs, a rubber duck and a paper boat. Bee impacts apply exaggerated impulses. Props trigger chain reactions on each other. Breakables shatter, pop, spray spores or leave sticky honey puddles. Light objects can be carried and thrown. The **Chaos Score** uses combo multipliers (up to x8), gives diminishing returns for spamming the same trick, and awards a bonus for each new trick type (28 tricks to discover).
+**Combat.** Eight elemental spells: Fireball → Flame Explosion, Ice Shards → Frost Nova, Lightning Bolt → Chain Lightning, Wind Blade → Tornado. They cover projectile, hitscan, area-on-target, self-area and chain casts, plus charged specials, a channelled beam (Prismatic Ray), a barrier (Aegis) and an ultimate (Aetherfall, a meteor storm). The combat system adds:
+- three-hit combos with finishers;
+- perfect parries that reflect projectiles and grant a guaranteed-crit counter;
+- block stamina and guard breaks;
+- crits, weak points, poise, stagger, knockback, cast interruption, mana and stamina regeneration, hit-stop and slow motion.
 
-**Creatures** (lightweight state machines: idle, wander, interact, flee, chase, return, tumble, dazed): butterflies, worker bees (they fly a nectar route into the hive), the Queen, royal guards (bump the Queen and see), ladybugs, stag beetles that charge, spiders that hunt bees stuck in webs, robins that chase annoying bees, dragonflies, snails and fireflies. Any of them can be bowled over; they react with speech bubbles.
+**Elemental reactions** are data-driven:
 
-**Systems.** Pollen comes from touching flowers. Nectar is sipped with E and delivered to the hive, where it turns into honey. There are 18 hidden Golden Pollen orbs. Discovery tracks regions, landmarks, hive chambers and 11 species. There are 19 achievements. Environmental effects: water (buoyancy, currents, soggy wings), the waterfall push, updrafts, wind gusts, honey and webs (mash keys to escape), and bouncy mushrooms.
+| Reaction | Trigger |
+| --- | --- |
+| Thermal Shock | Fire on a frozen or chilled target |
+| Overcharge | Lightning on a wet target; chains to nearby wet foes |
+| Shatter | Heavy hit on a frozen target |
+| Fire Tornado | Fire cast into a Tornado ignites it |
+| Accelerated Spell | Ice, lightning or wind projectiles passing through a Tornado speed up and hit harder |
+| Tailwind | A projectile cast within a second of a Wind Blade rides its slipstream |
+| Waterspout | A Tornado over water soaks everything it pulls in |
 
-**Activities** start at glowing hexagon totems: *Meadow Dash* (a 14-ring race with saved best time), *Pollen Rush*, *Nectar Run*, *Chaos Combo* and *Hive Explorer*, plus the ongoing orb hunt.
+Rivers and lakes make anything standing in them Wet.
 
-**UI.** Main menu over a live 3D scene, HUD (chaos/combo, compass, region, counters, boost, prompts, challenge card with objective arrow, struggle meter), toasts, floating score popups, a world map, a pause menu, settings (quality preset, adaptive resolution, sensitivity, FOV, invert Y, shake, volumes, FPS), controls, and progress/achievements. Progress and settings are saved to LocalStorage.
+**Enemies.** Three foes run on finite-state AI with perception and line of sight, telegraphed attacks, evasion and adaptive behaviour (they learn whether you fight at range and which way you dodge):
+- **Forest Wraith:** fast, chains claw attacks, lunges.
+- **Crystal Golem:** heavy, slams with jumpable shockwaves, has a weak core that is exposed after it swings.
+- **Corrupted Mage:** casts bolts, void zones and silencing hexes, raises barriers and blinks away.
 
-**Audio** is fully synthesized: a wing buzz that follows speed, impact, pop, glass, splash, boing and squawk effects, ambient wind, water and hive hum, birdsong, and a small generative music loop.
+**Azrak, the Crystal Tyrant.** A three-phase boss in the Crystal Throne arena, with an intro cutscene and a sealed arena:
+- **Phase I:** cleaves (which can be parried), a crushing fist that leaves his core exposed, crystal shard volleys and ground-slam shockwaves you can jump over.
+- **Phase II:** he draws on four Resonance Pillars for a Prism Ward; shatter the pillars to break it and stagger him. He adds cleave combos, lines of crystal spikes, prism rain, a leap that punishes kiting, and a sweeping prism beam that overheats him. The stone plinths block the beam.
+- **Phase III:** faster and harder-hitting. Four more pillars, volatile crystals you must shatter before they detonate, and chains of delayed slams.
+
+**RPG systems.**
+- Levelling: EXP and levels grant attribute points (Vitality, Wisdom, Endurance, Arcana, Fortitude, Precision, Warding) and skill points.
+- Skill tree: Pyromancer, Frostweaver and Stormcaller branches.
+- Inventory: potions and stat-granting relics.
+- Saves: autosave to LocalStorage at waystones, quest milestones and on pause or exit.
+
+**Quest: The Broken Seal.**
+1. Speak with Elder Mirael.
+2. Travel to the Eldergrove.
+3. Purge five corrupted creatures.
+4. Recover the three Arcane Crystals from their guardians at the Shrine of Verdance, Moonwell Falls and the Starfall Spire.
+5. Restore the Seal at the Seal Gate.
+6. Descend through the Academy and the Undercroft to defeat Azrak.
+7. Return to the Elder.
+
+The reward is 1500 EXP, the Heart of Azrak relic and the Prismatic Ray. A HUD tracker, a compass marker, map markers and a pillar of light guide you.
+
+**Presentation.** Bloom and ACES tone mapping, a shader sky with clouds, texel-snapped shadows, wind-animated grass and foliage, emissive glow masks, water and a waterfall, light shafts, instanced particle pools for every element, rune circles, ground-draped attack telegraphs, lightning ribbons, beams and crystal spikes. Damage numbers are pooled DOM elements. Sound effects, ambience (wind, water, birdsong, crickets, chimes) and adaptive music for exploring, combat and each boss phase are all synthesized live.
 
 ## Architecture
 
 ```
 src/lib/game/
-  core/      Game (orchestrator), GameLoop (rAF + fixed 60 Hz physics), InputManager,
-             CameraController, Settings (quality presets), context/types (UI bridge)
-  player/    BeeModel (expressive mesh), BeeController (flight), BeeAbilities (actions)
-  world/     WorldManager, TerrainGenerator, ChunkManager, Biomes (layout/regions),
-             Vegetation + Flora (instanced plants/trees), Hive, Features (landmarks),
-             Water, Sky, Materials (wind/grass shaders)
-  physics/   PhysicsWorld (Rapier wrapper, groups), Interactions (event → gameplay)
-  entities/  Props + PropDefs, NPCManager + Insects + InsectModels + SimpleBee
-  systems/   Chaos, Collection, Challenge, Environment, Achievements, Audio, Effects, Save
-  ui/        ScorePopups (pooled DOM text)
-  utils/     seeded Random, simplex Noise, SpatialHash, geometry helpers, math
-src/lib/components/   Svelte UI (GameRoot, HUD, menus, map, toasts) + reactive UI state
+  core/      Game (orchestrator, modes, saving, HUD snapshot), GameLoop (fixed 60 Hz +
+             interpolation, time scale), InputManager, CameraController, Settings, EventBus,
+             context (shared system references) and types (UI bridge)
+  world/     WorldLayout (regions, landmarks, waystones), Terrain (heightfield), ChunkManager
+             (streaming + LOD), Vegetation/Flora (instanced), Structures/StructureKit (merged
+             architecture + colliders), Water, Sky, Ambience, Materials (wind/glow shaders)
+  physics/   PhysicsWorld (Rapier wrapper, collision groups, ray casts, barriers)
+  player/    PlayerModel (rig + procedural animation), PlayerController (movement),
+             PlayerCombat (casting/defence), PlayerStateMachine (rule tables)
+  combat/    CombatSystem (hit pipeline, queries), DamageSystem, StatusEffects, TargetingSystem
+  magic/     SpellRegistry (data), SpellSystem (projectiles, AoE, tornado, channel, ultimate),
+             ElementalReactions (data + evaluation)
+  entities/  Enemy/EnemyAI/EnemyTypes/EnemyModels/EnemyManager (encounters), Boss + BossModel,
+             NPC (dialogue runner), Interactables (waystones, caches, crystals, lore, Seal),
+             Pickups
+  systems/   Progression, Inventory, QuestSystem, SaveSystem, PlayerProfile (adaptive AI),
+             AudioManager, Lore
+  vfx/       MagicVFX, ParticlePool, VfxPrimitives (rings, circles, telegraphs, arcs, beams,
+             spikes, shield), Textures, DamageNumbers
+src/lib/components/   Svelte UI: HUD, menus, settings, controls, character/skills/map panels,
+                      dialogue, notifications, game over, victory
 ```
 
-Three.js and Rapier are loaded with a dynamic `import()` inside `onMount`, so SSR and prerendering never touch WebGL. Svelte only renders UI. The game writes HUD state at about 10 Hz through a small bridge, field by field.
+The game modules are loaded with a dynamic `import()` inside `onMount`, so SSR and prerendering never touch WebGL, Rapier or Web Audio. Rendering, physics, gameplay and UI stay separate. Gameplay talks to Svelte only through the `UIBridge`, and the HUD is pushed about 10 times a second.
 
 ## Performance
 
-- Instanced rendering for all vegetation, rocks, trees, props, hive cells and grass. The grass is a single instanced draw whose blades wrap around the player and sample a terrain data texture for height and density.
-- Chunked world (8×8 chunks) with distance culling per layer, two terrain LODs with crack-hiding skirts, and three.js frustum culling per chunk.
-- Rapier physics on a fixed timestep with interpolation. Prop bodies exist only within about 150 m of the player and sleep when idle. NPCs use kinematic AI instead of physics bodies.
-- Pooled particles (one `Points` draw), pooled debris, pooled popups and honey puddles. Shared geometries and materials, and NPC models baked down to 1–3 draws each.
-- Shadows only from large casters, with a texel-snapped shadow frustum that follows the player.
-- Graphics presets (Low to Ultra) control pixel ratio, shadow size, grass count, draw distance and flower density. Adaptive resolution lowers the pixel ratio when frames run slow. The loop pauses while the tab is hidden.
+- Instanced vegetation, rocks and crystals with distance LOD; architecture merged into a few draws per structure.
+- 9×9 terrain chunks streamed in and out around the player, one GPU build per frame.
+- Pooled projectiles, particles, rings, telegraphs, arcs, beams, spikes, lights and damage numbers.
+- Enemies spawn by encounter only near the player and despawn behind them.
+- Quality presets (Low / Medium / High) set pixel ratio, shadows, bloom, MSAA, grass, draw distance, vegetation density and particle budget. An adaptive-resolution option lowers the pixel ratio when frames run slow.
+- Shaders are compiled during loading. While paused or in menus the simulation stops and the scene redraws only a few times a second; audio suspends while the tab is hidden.
 
-## Known limitations
+## Testing status and known limitations
 
-- No touch controls yet (keyboard/mouse and gamepad are supported).
-- Chunks are all generated at load. Streaming is visibility- and LOD-based rather than on-demand generation, and the hive interior detail and lights switch on near the hive.
-- Held objects are swept against walls and floors, but if the bee itself hugs the ground the object overlaps the bee.
-- Performance was profiled by draw-call and triangle counts in headless Chromium using software rendering (about 350–420 draws including the shadow pass, about 1M triangles on High). It has not yet been measured on Apple Silicon hardware.
+- `bun run check` (svelte-check) reports no errors or warnings, and `bun run build` succeeds.
+- Gameplay was checked in headless Chromium with software rendering (SwiftShader). Scripted Playwright runs drive real keyboard and mouse input, using debug teleports and damage only to skip travel time. They covered:
+  - **Movement and defence:** movement, dodge, double jump and shield.
+  - **Spells:** every basic and special spell.
+  - **Reactions:** all seven elemental reactions, triggered by actual casts.
+  - **The quest:** from the first dialogue to the epilogue, including the Seal cutscene.
+  - **The boss:**
+    - every attack, forced once each;
+    - all three phases and breaking the pillar ward;
+    - parry stagger, the overheat window and shattering volatile crystals;
+    - the arena barrier;
+    - dying mid-fight, respawning with a full boss reset, and re-entering.
+  - **Wrap-up:** victory and rewards, pause and panels, and reloading the save with Continue.
+- Software rendering runs at about 10–60 fps depending on the scene, so frame cost has **not** been measured on a real GPU. The Low/Medium/High presets may need tuning on actual hardware.
+- Balance (boss health, damage, EXP curve) is set from the numbers in code and the scripted runs, not from a human play-through.
+- There are no touch controls yet.
+
+For debugging, `window.__game.debug()` returns the live game context (player, enemies, boss, quests, and so on).

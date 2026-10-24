@@ -16,7 +16,7 @@ const FLOOR = HEIGHTS.arenaFloor;
 const CENTER = new THREE.Vector3(ARENA.x, FLOOR, ARENA.z);
 /** The boss keeps inside this radius of the arena centre. */
 const ROAM_R = ARENA.r - 5;
-const MAX_HP = 3400;
+const MAX_HP = 4000;
 const PHASES = [0.66, 0.33];
 const RADIUS = 1.8;
 const HEIGHT = 7.2;
@@ -1325,8 +1325,9 @@ export class BossFight implements CombatantSource, Combatant {
 				_b.copy(player.position).setY(player.position.y + 1.6);
 				const d2 = segSegDist2(this.core, this.beamEnd, _a, _b, _st);
 				if (d2 < 1.1 * 1.1) {
-					this.beamTick = 0.2;
-					this.hitPlayer(10, _v2.set(fx, 0, fz), { name: 'Prism Beam', knockback: 2.5, tags: HitTag.BEAM, blockable: true, element: 'arcane' });
+					// Slower than the player's post-hit mercy window so ticks don't read as "Evaded".
+					this.beamTick = 0.34;
+					this.hitPlayer(15, _v2.set(fx, 0, fz), { name: 'Prism Beam', knockback: 2.5, tags: HitTag.BEAM, blockable: true, element: 'arcane' });
 				}
 			}
 			return;

@@ -24,7 +24,7 @@ export const LORE: Record<string, { speaker: string; title: string; lines: strin
 	'lore-grotto': {
 		speaker: 'Hidden Inscription',
 		title: 'A Smuggler\'s Note',
-		lines: ['"If you are reading this, you found the gap behind the falls. Good. The locket is yours. It kept me warm through three winters."']
+		lines: ['"If you are reading this, you found my hideaway. Good. The locket is yours. It kept me warm through three winters."']
 	},
 	'lore-spire': {
 		speaker: 'Starfall Plinth',
