@@ -83,6 +83,7 @@ export class Props {
 	private ropeMat = new THREE.LineBasicMaterial({ color: 0xffffff });
 	private tmpRot = { x: 0, y: 0, z: 0, w: 1 };
 	cupsTipped = new Set<number>();
+	private dirtyKinds = new Set<PropKind>();
 
 	constructor(private ctx: GameContext) {
 		const spawns = this.buildSpawns();
@@ -222,7 +223,8 @@ export class Props {
 		for (const h of hive.ceilingHooks) add({ kind: 'honeyglob', pos: h.clone().setY(h.y - 1.6), pinned: true });
 		add({ kind: 'honeyjar', pos: new THREE.Vector3(HIVE.x + 9, HIVE.baseY + 1.55, HIVE.z + 4) });
 		add({ kind: 'honeyjar', pos: new THREE.Vector3(HIVE.x - 8, HIVE.baseY + 1.55, HIVE.z - 6) });
-		add({ kind: 'waxplug', pos: hive.apex.clone().setY(hive.apex.y + 0.75), asleep: true });
+		// Rests on the rim of the hole at the dome's apex (a secret exit once knocked away).
+		add({ kind: 'waxplug', pos: hive.apex.clone().setY(hive.apex.y + 0.3), asleep: true });
 		return out;
 	}
 
@@ -416,7 +418,8 @@ export class Props {
 			this.updateActivation();
 			this.respawnBroken();
 		}
-		const dirty = new Set<PropKind>();
+		const dirty = this.dirtyKinds;
+		dirty.clear();
 		for (const p of this.list) {
 			if (p.broken) continue;
 			if (!p.body) continue;

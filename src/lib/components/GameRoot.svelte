@@ -71,7 +71,8 @@
 			panel = 'none';
 			e.preventDefault();
 		} else if (ui.mapOpen) ui.toggleMap(false);
-		else if (ui.mode === 'paused') resume();
+		// Some browsers also deliver the Esc that released pointer lock; don't bounce straight back.
+		else if (ui.mode === 'paused' && performance.now() - ui.modeChangedAt > 500) resume();
 	}
 </script>
 

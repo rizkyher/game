@@ -77,7 +77,14 @@ export class Game {
 		this.resizeObs = new ResizeObserver(() => this.resize());
 		this.resizeObs.observe(canvas.parentElement ?? canvas);
 		window.addEventListener('beforeunload', this.onBeforeUnload);
+		document.addEventListener('visibilitychange', this.onVisibility);
 	}
+
+	private onVisibility = () => {
+		if (!this.ctx) return;
+		if (document.hidden) this.ctx.audio.suspend();
+		else if (this.mode !== 'paused') this.ctx.audio.resume();
+	};
 
 	async init(): Promise<void> {
 		const ui = this.ui;
@@ -156,11 +163,22 @@ export class Game {
 		if (!this.started) {
 			this.started = true;
 			ctx.cameraCtl.snapBehind(ctx.player.yaw + Math.PI);
+			if (this.save.data.playTime < 30) this.showTips();
 		}
 		ctx.cameraCtl.mode = 'follow';
 		ctx.audio.resume();
 		this.setMode('playing');
 		void this.input.requestLock().then((ok) => this.ui.setLocked(ok));
+	}
+
+	/** A few staggered onboarding hints for first-time players. */
+	private showTips(): void {
+		const tips: [string, string][] = [
+			['Fly with WASD + mouse', 'Space up · Ctrl/C down · Shift boost · Q dash · R barrel roll'],
+			['Cause CHAOS!', 'Crash into things, headbutt (left click), sting (right click). Chain tricks for combos.'],
+			['Explore & collect', 'Hover on flowers for pollen, press E for nectar, find ✨ Golden Pollen. M opens the map.']
+		];
+		tips.forEach(([t, d], i) => setTimeout(() => this.mode === 'playing' && this.ui.notify(t, d, 'info'), 1200 + i * 4200));
 	}
 
 	pause(): void {
@@ -231,6 +249,7 @@ export class Game {
 		const ctx = this.ctx;
 		const preset = QUALITY_PRESETS[s.quality];
 		ctx.world.sky.setShadowQuality(preset.shadows, preset.shadowSize);
+		ctx.player.blobShadow.visible = !preset.shadows;
 		ctx.world.sky.setShadowExtent(preset.shadowExtent);
 		if (this.renderer.shadowMap.enabled !== preset.shadows) {
 			this.renderer.shadowMap.enabled = preset.shadows;
@@ -439,6 +458,7 @@ export class Game {
 	dispose(): void {
 		this.disposed = true;
 		window.removeEventListener('beforeunload', this.onBeforeUnload);
+		document.removeEventListener('visibilitychange', this.onVisibility);
 		this.resizeObs.disconnect();
 		this.loop?.dispose();
 		this.input.exitLock();

@@ -41,10 +41,13 @@ export class UIState implements UIBridge {
 	notices = $state<Notice[]>([]);
 	locked = $state(false);
 	mapOpen = $state(false);
+	/** performance.now() of the last mode change (not reactive). */
+	modeChangedAt = 0;
 	private nextId = 1;
 
 	setMode(mode: GameMode): void {
 		this.mode = mode;
+		this.modeChangedAt = performance.now();
 		if (mode !== 'playing') this.mapOpen = false;
 	}
 

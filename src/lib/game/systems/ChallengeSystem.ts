@@ -43,6 +43,7 @@ export class ChallengeSystem {
 	readonly defs: ChallengeDef[];
 	active: Active | null = null;
 	private totems: THREE.Group[] = [];
+	private caps: THREE.Object3D[] = [];
 	private rings: THREE.Mesh[] = [];
 	private ringNormals: THREE.Vector3[] = [];
 	private ringMat: THREE.MeshStandardMaterial;
@@ -58,7 +59,7 @@ export class ChallengeSystem {
 		const pic = landmark('picnic');
 		const hiveOut = ctx.world.hive.info.entranceOutside;
 		this.defs = [
-			{ id: 'race', title: 'Meadow Dash', icon: '🏁', desc: 'Fly through all 14 rings as fast as you can.', color: 0x40c4ff, time: 240, totem: g(SPAWN.x + 14, SPAWN.z - 6) },
+			{ id: 'race', title: 'Meadow Dash', icon: '🏁', desc: 'Fly through all 14 rings as fast as you can.', color: 0x40c4ff, time: 240, totem: g(SPAWN.x - 18, SPAWN.z + 4) },
 			{ id: 'pollen', title: 'Pollen Rush', icon: '🌼', desc: 'Collect 80 pollen in 60 seconds.', color: 0xffeb3b, time: 60, totem: g(sun.x - 60, sun.z - 10) },
 			{ id: 'nectar', title: 'Nectar Run', icon: '🍯', desc: 'Deliver 8 nectar to the hive within 4 minutes.', color: 0xffa000, time: 240, totem: g(hiveOut.x + 8, hiveOut.z + 10) },
 			{ id: 'chaos', title: 'Chaos Combo', icon: '💥', desc: 'Earn 1,500 chaos within 60 seconds.', color: 0xff4081, time: 60, totem: g(pic.x + 26, pic.z - 4) },
@@ -76,7 +77,6 @@ export class ChallengeSystem {
 			pillar.castShadow = true;
 			const cap = new THREE.Mesh(capGeo, mat);
 			cap.position.y = 6.6;
-			cap.name = 'cap';
 			const tex = canvasTexture(128, 128, (c) => {
 				c.font = '92px serif';
 				c.textAlign = 'center';
@@ -87,6 +87,7 @@ export class ChallengeSystem {
 			sprite.position.y = 9.4;
 			sprite.scale.setScalar(3.2);
 			grp.add(pillar, cap, sprite);
+			this.caps.push(cap);
 			ctx.scene.add(grp);
 			ctx.physics.addCylinder(d.totem.x, d.totem.y + 2.5, d.totem.z, 2.5, 1.8, { kind: 'static', material: 'stone' });
 			this.totems.push(grp);
@@ -249,14 +250,12 @@ export class ChallengeSystem {
 		const ctx = this.ctx;
 		const p = ctx.player.position;
 		this.nearTotem = null;
-		this.totems.forEach((grp, i) => {
-			const cap = grp.getObjectByName('cap');
-			if (cap) {
-				cap.rotation.y += dt * 1.5;
-				cap.position.y = 6.6 + Math.sin(ctx.time * 2 + i) * 0.3;
-			}
-			if (grp.position.distanceTo(p) < 8) this.nearTotem = this.defs[i];
-		});
+		for (let i = 0; i < this.totems.length; i++) {
+			const cap = this.caps[i];
+			cap.rotation.y += dt * 1.5;
+			cap.position.y = 6.6 + Math.sin(ctx.time * 2 + i) * 0.3;
+			if (this.totems[i].position.distanceTo(p) < 8) this.nearTotem = this.defs[i];
+		}
 		const a = this.active;
 		if (!a) return;
 		a.elapsed += dt;

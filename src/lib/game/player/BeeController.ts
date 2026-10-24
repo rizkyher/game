@@ -23,6 +23,7 @@ export const FLIGHT = {
 const _v = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _accel = new THREE.Vector2();
+const _down = new THREE.Vector3(0, -1, 0);
 
 /**
  * Arcade flight controller. The bee is a dynamic Rapier ball (rotation locked) whose velocity
@@ -37,6 +38,8 @@ export class BeeController {
 	readonly preStepVelocity = new THREE.Vector3();
 	readonly body: RigidBody;
 	readonly collider: Collider;
+	/** Fake contact shadow used when real shadows are disabled (Low preset). */
+	readonly blobShadow: THREE.Mesh;
 	yaw = 0;
 	stunned = 0;
 	/** Seconds of reduced control after a launch/bounce. */
@@ -82,6 +85,13 @@ export class BeeController {
 		this.position.copy(spawn);
 		this.prevPosition.copy(spawn);
 		this.renderPosition.copy(spawn);
+		this.blobShadow = new THREE.Mesh(
+			new THREE.CircleGeometry(0.9, 20).rotateX(-Math.PI / 2),
+			new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false })
+		);
+		this.blobShadow.renderOrder = 1;
+		this.blobShadow.visible = false;
+		ctx.scene.add(this.blobShadow);
 	}
 
 	get colliderHandle(): number {
@@ -152,9 +162,14 @@ export class BeeController {
 			let ty = 0;
 			if (up) ty += this.boosting ? FLIGHT.ascendBoost : FLIGHT.ascend;
 			if (down) ty -= FLIGHT.descend;
-			// "Fly where you look": a steep camera pitch adds climb/dive while moving forward.
-			const look = -Math.sin(cam.pitch - 0.28);
-			if (f > 0 && Math.abs(look) > 0.18) ty += (look - Math.sign(look) * 0.18) * maxSpeed * 1.3 * f;
+			// "Fly where you look": only a clearly raised or lowered camera adds climb/dive while
+			// moving forward; the default over-the-shoulder view (pitch ~0.3) flies level.
+			const tilt = cam.pitch - 0.25;
+			const deadZone = 0.32;
+			if (f > 0 && Math.abs(tilt) > deadZone) {
+				const steer = clamp(-(tilt - Math.sign(tilt) * deadZone), -0.7, 0.7);
+				ty += steer * maxSpeed * 1.25 * f;
+			}
 			if (this.diving) ty = -FLIGHT.diveSpeed;
 			ty *= speedMul;
 			const control = this.controlScale * (this.launchTime > 0 ? 0.25 : 1);
@@ -267,6 +282,15 @@ export class BeeController {
 		this.coatHoney = damp(this.coatHoney, env.honeyCoat > 0 || env.stuck === 'honey' ? 1 : 0, 3, dt);
 		this.coatWet = damp(this.coatWet, env.wet > 0 ? 1 : 0, 3, dt);
 		m.setCoat(this.coatHoney, this.coatWet);
+		if (this.blobShadow.visible) {
+			const hit = ctx.physics.castStatic(this.renderPosition, _down, 60);
+			const mat = this.blobShadow.material as THREE.MeshBasicMaterial;
+			if (hit >= 0) {
+				this.blobShadow.position.set(this.renderPosition.x, this.renderPosition.y - hit + 0.06, this.renderPosition.z);
+				this.blobShadow.scale.setScalar(1 + hit * 0.03);
+				mat.opacity = 0.32 * (1 - hit / 60);
+			} else mat.opacity = 0;
+		}
 		const flap = env.stuck ? 1 : clamp(0.35 + this.speed01 * 0.6 + (this.boosting ? 0.2 : 0), 0, 1);
 		_accel.set(this.localAccel.x, this.localAccel.y);
 		m.update(dt, ctx.time, flap, _accel, this.coatWet * 0.6);
@@ -275,5 +299,8 @@ export class BeeController {
 	dispose(): void {
 		this.model.root.removeFromParent();
 		this.model.dispose();
+		this.blobShadow.removeFromParent();
+		this.blobShadow.geometry.dispose();
+		(this.blobShadow.material as THREE.Material).dispose();
 	}
 }

@@ -49,6 +49,7 @@ export class InputManager {
 	onLockChange?: (locked: boolean) => void;
 	onKey?: (code: string) => void;
 	private lastUnlock = 0;
+	private lockedAt = 0;
 
 	constructor(private target: HTMLElement) {
 		window.addEventListener('keydown', this.onKeyDown);
@@ -93,8 +94,10 @@ export class InputManager {
 
 	private onMouseMove = (e: MouseEvent) => {
 		if (!this.locked) return;
-		// Guard against the occasional huge spike some browsers emit right after locking.
-		if (Math.abs(e.movementX) > 400 || Math.abs(e.movementY) > 400) return;
+		// Browsers can emit one big synthetic delta right after locking (the cursor "jump");
+		// ignore a short window after the lock and any absurd single-event spikes.
+		if (performance.now() - this.lockedAt < 150) return;
+		if (Math.abs(e.movementX) > 300 || Math.abs(e.movementY) > 300) return;
 		this.dx += e.movementX;
 		this.dy += e.movementY;
 	};
@@ -108,7 +111,11 @@ export class InputManager {
 
 	private onPointerLockChange = () => {
 		this.locked = document.pointerLockElement === this.target;
-		if (!this.locked) {
+		if (this.locked) {
+			this.lockedAt = performance.now();
+			this.dx = 0;
+			this.dy = 0;
+		} else {
 			this.lastUnlock = performance.now();
 			this.mouseDown.fill(false);
 		}

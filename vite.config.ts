@@ -4,6 +4,10 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+	build: {
+		// Rapier ships its WASM inlined as base64 (~4 MB); it is lazy-loaded with the game.
+		chunkSizeWarningLimit: 5000
+	},
 	plugins: [
 		tailwindcss(),
 		sveltekit({
