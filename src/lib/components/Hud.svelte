@@ -97,27 +97,7 @@
 		</div>
 		<div class="mt-1 font-display text-[11px] tracking-[0.3em] text-gold-300/90 drop-shadow">{h.region.toUpperCase()}</div>
 
-		{#if h.boss}
-			{@const b = h.boss}
-			<div class="af-fade-in mt-3 w-[620px]">
-				<div class="mb-1 flex items-end justify-between">
-					<div>
-						<div class="af-title text-xl font-bold">{b.name}</div>
-						<div class="text-xs tracking-[0.25em] text-arcane-300 italic">{b.title}</div>
-					</div>
-					<div class="font-display text-xs tracking-[0.2em] text-gold-300">PHASE {b.phase}</div>
-				</div>
-				<div class="af-bar" style="height: 18px; border-color: #c9a45c">
-					<div class="ghost" style="width: {pct(b.hp, b.maxHp)}"></div>
-					<div class="fill" style="width: {pct(b.hp, b.maxHp)}; background: linear-gradient(180deg, {b.phase >= 3 ? '#ff5ab0, #8a1050' : '#d07aff, #5a2aa8'})"></div>
-					{#each b.phases as p (p)}
-						<div class="absolute top-0 bottom-0 w-[2px] bg-gold-200/80" style="left: {p * 100}%"></div>
-					{/each}
-					<div class="shine"></div>
-				</div>
-				{#if b.broken}<div class="af-pulse mt-1 text-center font-display text-xs tracking-[0.3em] text-[#ffd070]">GUARD SHATTERED — STRIKE NOW</div>{/if}
-			</div>
-		{:else if h.target}
+		{#if h.target && !h.boss}
 			{@const t = h.target}
 			<div class="af-fade-in mt-3 w-[340px]">
 				<div class="flex items-baseline justify-between">
@@ -144,7 +124,7 @@
 	</div>
 
 	<!-- ============ Quest tracker (right) ============ -->
-	{#if h.quest}
+	{#if h.quest && !h.boss}
 		{@const q = h.quest}
 		<div class="absolute top-20 right-5 w-[300px] text-right">
 			<div class="font-display text-[11px] tracking-[0.3em] text-gold-400">QUEST</div>
@@ -194,8 +174,32 @@
 		<div class="absolute bottom-[150px] left-1/2 -translate-x-1/2 af-fade-in">
 			<div class="af-glass flex items-center gap-2 rounded-sm px-4 py-1.5 text-lg">
 				<span class="af-key">E</span>
-				<span>{h.prompt}</span>
+				<span class="whitespace-nowrap">{h.prompt}</span>
 			</div>
+		</div>
+	{/if}
+
+	<!-- ============ Boss bar (bottom-center, above the hotbar) ============ -->
+	{#if h.boss}
+		{@const b = h.boss}
+		<div class="af-fade-in absolute bottom-[132px] left-1/2 w-[min(640px,66vw)] -translate-x-1/2">
+			<div class="mb-1 flex items-end justify-between">
+				<div>
+					<div class="af-title text-xl font-bold">{b.name}</div>
+					<div class="text-xs tracking-[0.25em] text-arcane-300 italic">{b.title}</div>
+				</div>
+				<div class="font-display text-xs tracking-[0.2em] text-gold-300">PHASE {b.phase}</div>
+			</div>
+			<div class="af-bar" style="height: 18px; border-color: #c9a45c">
+				<div class="ghost" style="width: {pct(b.hp, b.maxHp)}"></div>
+				<div class="fill" style="width: {pct(b.hp, b.maxHp)}; background: linear-gradient(180deg, {b.phase >= 3 ? '#ff5ab0, #8a1050' : '#d07aff, #5a2aa8'})"></div>
+				{#each b.phases as p (p)}
+					<div class="absolute top-0 bottom-0 w-[2px] bg-gold-200/80" style="left: {p * 100}%"></div>
+				{/each}
+				<div class="shine"></div>
+			</div>
+			{#if b.broken}<div class="af-pulse mt-1 text-center font-display text-xs tracking-[0.3em] text-[#ffd070]">GUARD SHATTERED — STRIKE NOW</div>
+			{:else if b.shield > 0}<div class="mt-1 text-center font-display text-xs tracking-[0.25em] text-[#e0a8ff]">◆ PRISM WARD — SHATTER {b.shield} RESONANCE PILLAR{b.shield > 1 ? 'S' : ''}</div>{/if}
 		</div>
 	{/if}
 

@@ -459,7 +459,7 @@ export class SpellSystem {
 			this.after(j * 0.07, () => {
 				if (!target.alive) return;
 				const p = target.aimPoint(new THREE.Vector3());
-				ctx.vfx.bolt(src, p, ELEMENT_COLORS.lightning, j === 0 ? 0.6 : 0.42, 0.28);
+				ctx.vfx.bolt(src, p, ELEMENT_COLORS.lightning, j === 0 ? 0.65 : 0.5, 0.42);
 				ctx.vfx.impact('lightning', p, 1.1);
 				ctx.audio.sfx('impact_lightning', p, { volume: 0.75, pitch: 1 + j * 0.08 });
 				const h = ctx.combat.playerHit({

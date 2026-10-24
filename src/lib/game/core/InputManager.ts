@@ -136,7 +136,9 @@ export class InputManager {
 		// Tab would move focus out of the canvas even in menus.
 		if (e.code === 'Tab') e.preventDefault();
 		if (!e.repeat) {
-			this.pressed.add(e.code);
+			// Presses made while gameplay input is off (dialogue, menus) must not leak into the
+			// first frame after it turns back on: closing a dialogue with E would re-open it.
+			if (this.enabled) this.pressed.add(e.code);
 			this.onKey?.(e.code);
 		}
 		this.down.add(e.code);

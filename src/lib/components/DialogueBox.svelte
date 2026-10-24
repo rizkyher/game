@@ -2,12 +2,15 @@
 	import type { DialogueView } from '../game/core/types';
 
 	let { d, onnext, onchoose }: { d: DialogueView; onnext: () => void; onchoose: (id: string) => void } = $props();
-	const last = $derived(d.index >= d.lines.length - 1);
+	// `d` can turn null for a moment while the box closes (before the parent unmounts it).
+	const last = $derived(!d || d.index >= d.lines.length - 1);
 
 	function onKey(e: KeyboardEvent) {
+		if (!d) return;
 		if (e.code === 'KeyE' || e.code === 'Space' || e.code === 'Enter') {
 			e.preventDefault();
 			if (!(last && d.choices?.length)) onnext();
+			return;
 		}
 		if (d.choices && last) {
 			const n = Number(e.key);

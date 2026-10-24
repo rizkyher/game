@@ -24,7 +24,7 @@ import { SpellSystem } from '../magic/SpellSystem';
 import { ELEMENT_SPELLS, SPELLS } from '../magic/SpellRegistry';
 import { EnemyManager } from '../entities/EnemyManager';
 import { Pickups } from '../entities/Pickups';
-import { Interactables } from '../entities/Interactables';
+import { CRYSTALS, Interactables } from '../entities/Interactables';
 import { NPCs } from '../entities/NPC';
 import { BossFight } from '../entities/Boss';
 import { QuestSystem } from '../systems/QuestSystem';
@@ -364,6 +364,8 @@ export class Game {
 		ctx.player.refreshStats(true);
 		ctx.profile.reset();
 		ctx.combat.reset();
+		ctx.boss.reset();
+		ctx.interactables.sync();
 		this.ui.refresh();
 	}
 
@@ -495,6 +497,7 @@ export class Game {
 		ctx.enemies.setCleared(this.save.data.cleared);
 		ctx.targeting.clear();
 		ctx.playerCombat.reset();
+		ctx.boss.reset();
 		const cp = this.checkpointPosition();
 		ctx.player.revive(cp.pos, cp.yaw);
 		ctx.cameraCtl.snapBehind(cp.yaw + Math.PI);
@@ -645,6 +648,7 @@ export class Game {
 
 	private frameInner(dt: number, alpha: number, t0: number): void {
 		const ctx = this.ctx;
+		this.perf.frames++;
 		this.input.pollGamepad(dt);
 		this.ui.setGamepad(this.input.gamepadActive);
 		if (this.input.padButtonPressed(PAD.START)) {
@@ -710,7 +714,6 @@ export class Game {
 		pf.sim += (this.simAcc - pf.sim) * k;
 		pf.logic += (t1 - t0 - pf.logic) * k;
 		pf.render += (t2 - t1 - pf.render) * k;
-		pf.frames++;
 		this.simAcc = 0;
 		this.input.endFrame();
 	}
@@ -855,6 +858,13 @@ export class Game {
 		const markers: MapMarker[] = [];
 		for (const l of LANDMARKS) markers.push({ id: l.id, name: d.discovered.includes(l.id) ? l.name : '???', icon: l.icon, x: l.x, z: l.z, kind: 'landmark', active: d.discovered.includes(l.id) });
 		for (const w of WAYSTONES) markers.push({ id: w.id, name: w.name, icon: 'waystone', x: w.x, z: w.z, kind: 'waystone', active: d.waystones.includes(w.id) });
+		if (d.quest.stage >= 1 && d.quest.stage <= 3) {
+			for (const c of CRYSTALS) {
+				if (d.quest.crystals.includes(c.id)) continue;
+				const a = ctx.world.structures.anchors[c.anchor];
+				markers.push({ id: c.id, name: c.name, icon: 'crystal', x: a.x, z: a.z, kind: 'crystal', active: true });
+			}
+		}
 		const obj = ctx.quests.objective();
 		return {
 			image: this.mapImage!,

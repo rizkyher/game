@@ -20,7 +20,8 @@
 		ruins: '⌘',
 		temple: '△',
 		boss: '♛',
-		crossroads: '✛'
+		crossroads: '✛',
+		crystal: '◆'
 	};
 	const px = (x: number) => ((x + WORLD_HALF) / WORLD_SIZE) * SIZE;
 

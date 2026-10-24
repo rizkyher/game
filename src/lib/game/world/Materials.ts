@@ -157,7 +157,7 @@ export function grassMaterial(dataTex: THREE.DataTexture): THREE.MeshLambertMate
 		uCenter: { value: new THREE.Vector2() },
 		uArea: { value: 84 },
 		uRadius: { value: 42 },
-		uBlade: { value: 1.25 }
+		uBlade: { value: 0.9 }
 	};
 	mat.userData.uniforms = uniforms;
 	mat.onBeforeCompile = (shader) => {
@@ -189,7 +189,7 @@ export function grassMaterial(dataTex: THREE.DataTexture): THREE.MeshLambertMate
 			float gDist = length(gWp - uCenter);
 			float gFade = 1.0 - smoothstep(uRadius * 0.7, uRadius, gDist);
 			float gSanct = smoothstep(-118.0, -150.0, gWp.y);
-			float gScale = gKeep * gFade * (0.55 + aOffset.w * 0.9) * mix(1.0, 0.8, gData.b) * mix(1.0, 0.7, gSanct);
+			float gScale = gKeep * gFade * (0.6 + aOffset.w * 0.7) * mix(1.0, 0.8, gData.b) * mix(1.0, 0.7, gSanct);
 			float gAng = aOffset.z * 61.0 + aOffset.w * 17.0;
 			float gc = cos(gAng);
 			float gs = sin(gAng);
@@ -215,7 +215,7 @@ export function grassMaterial(dataTex: THREE.DataTexture): THREE.MeshLambertMate
 			vec3 gCol = mix(gVale, gForest, gData.b);
 			gCol = mix(gCol, gHigh, gData.a);
 			gCol = mix(gCol, gAsh, gSanct);
-			vColor = vec4(gCol * mix(0.35, 1.1, gT), 1.0);
+			vColor = vec4(gCol * mix(0.6, 1.15, gT), 1.0);
 		`
 				)
 				.replace('#include <color_vertex>', '');

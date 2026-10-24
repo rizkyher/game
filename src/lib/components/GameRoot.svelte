@@ -69,7 +69,12 @@
 	<canvas bind:this={canvas} class="block h-full w-full outline-none" onclick={() => game?.capture()}></canvas>
 	<div bind:this={popupLayer} class="pointer-events-none absolute inset-0 overflow-hidden"></div>
 
-	{#if ui.mode === 'playing' || ui.mode === 'cutscene' || ui.mode === 'dead'}
+	{#if ui.mode === 'cutscene'}
+		<div class="pointer-events-none absolute inset-x-0 top-0 h-[10vh] bg-black/90 af-fade-in"></div>
+		<div class="pointer-events-none absolute inset-x-0 bottom-0 h-[10vh] bg-black/90 af-fade-in"></div>
+	{/if}
+
+	{#if ui.mode === 'playing' || ui.mode === 'dead'}
 		<Hud {ui} />
 		{#if ui.mode === 'playing' && !ui.locked && !ui.gamepad}
 			<button class="absolute inset-0 z-10 grid cursor-pointer place-items-center bg-ink-950/30" onclick={() => game?.capture()}>

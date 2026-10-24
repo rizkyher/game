@@ -104,14 +104,28 @@ export class UIState implements UIBridge {
 	}
 
 	banner(title: string, subtitle: string, kind: Banner['kind']): void {
-		const id = this.nextId++;
-		this.banners = [...this.banners.filter((b) => b.kind !== kind).slice(-1), { id, title, subtitle, kind }];
-		setTimeout(
-			() => {
-				this.banners = this.banners.filter((b) => b.id !== id);
-			},
-			kind === 'boss' || kind === 'victory' ? 4800 : 3600
-		);
+		const b: Banner = { id: this.nextId++, title, subtitle, kind };
+		// A newer banner of the same kind replaces a queued one; boss/victory/level cut in line.
+		this.bannerQueue = this.bannerQueue.filter((x) => x.kind !== kind).slice(-2);
+		const urgent = kind === 'boss' || kind === 'victory' || kind === 'level';
+		if (urgent) {
+			this.bannerQueue.unshift(b);
+			this.nextBanner();
+		} else {
+			this.bannerQueue.push(b);
+			if (!this.banners.length) this.nextBanner();
+		}
+	}
+
+	private bannerQueue: Banner[] = [];
+	private bannerTimer: ReturnType<typeof setTimeout> | null = null;
+
+	private nextBanner(): void {
+		if (this.bannerTimer) clearTimeout(this.bannerTimer);
+		this.bannerTimer = null;
+		const b = this.bannerQueue.shift();
+		this.banners = b ? [b] : [];
+		if (b) this.bannerTimer = setTimeout(() => this.nextBanner(), b.kind === 'boss' || b.kind === 'victory' ? 4200 : 2900);
 	}
 
 	setLocked(locked: boolean): void {

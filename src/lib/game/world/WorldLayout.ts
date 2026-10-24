@@ -133,7 +133,7 @@ export interface WaystoneDef {
 
 /** Checkpoints: activating one saves the game and becomes the respawn point. */
 export const WAYSTONES: WaystoneDef[] = [
-	{ id: 'hollow', name: 'Lumen Hollow', x: -12, z: 222 },
+	{ id: 'hollow', name: 'Lumen Hollow', x: -9, z: 210 },
 	{ id: 'crossroads', name: 'Crossroads Watch', x: -9, z: 104 },
 	{ id: 'forest', name: 'Eldergrove', x: -112, z: 100 },
 	{ id: 'falls', name: 'Moonwell Falls', x: -188, z: 192 },

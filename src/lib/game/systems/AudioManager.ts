@@ -893,7 +893,6 @@ export class AudioManager {
 		if (step === 0) this.chordIdx = (this.chordIdx + 1) % prog.length;
 		const chord = prog[this.chordIdx];
 		const mus = this.musicBus;
-		const ctx = this.ctx!;
 		if (this.mood === 'boss') {
 			// Driving ostinato, pounding drums, tense pad.
 			const bass = BOSS_BASS[this.beat % BOSS_BASS.length] - 12;
@@ -920,7 +919,6 @@ export class AudioManager {
 			this.hat(mus, t + spb / 2, 0.05 * c);
 			this.pluck(mus, midi(chord[0] - 12), t, spb * 0.8, 0.22 * c, 'sawtooth', 500);
 		}
-		void ctx;
 	}
 
 	private pad(dest: AudioNode, f: number, t: number, dur: number, vol: number): void {
