@@ -72,9 +72,10 @@ export class EnvironmentSystem {
 	}
 
 	/** Called by abilities when the player mashes keys while stuck. */
-	addStruggle(amount: number): void {
+	addStruggle(amount: number, wiggle = true): void {
 		if (!this.stuck) return;
 		this.struggle = Math.min(1, this.struggle + amount);
+		if (!wiggle) return;
 		this.ctx.player.model.bonk(0.15);
 		this.ctx.effects.emit(this.stuck === 'honey' ? 'honey' : 'sparkle', this.ctx.player.position, 2, 0.4);
 	}
@@ -190,7 +191,7 @@ export class EnvironmentSystem {
 			}
 		}
 		if (this.stuck) {
-			this.struggle = Math.max(0, this.struggle - dt * 0.12);
+			this.struggle = Math.max(0, this.struggle - dt * 0.06);
 			this.speedMul = 0.04;
 			if (this.struggle >= 1) this.escape();
 		} else {
@@ -222,7 +223,7 @@ export class EnvironmentSystem {
 			ctx.achievements.unlock('sticky_business');
 			ctx.effects.emit('honey', ctx.player.position, 14, 0.5);
 		}
-		ctx.ui.notify(kind === 'honey' ? 'STUCK IN HONEY!' : 'CAUGHT IN A WEB!', 'Mash SPACE / WASD to wriggle free', 'warning');
+		ctx.ui.notify(kind === 'honey' ? 'STUCK IN HONEY!' : 'CAUGHT IN A WEB!', 'Mash or hold SPACE / WASD to wriggle free', 'warning');
 	}
 
 	private escape(): void {
@@ -230,11 +231,11 @@ export class EnvironmentSystem {
 		const kind = this.stuck;
 		this.stuck = null;
 		this.struggle = 0;
-		this.immunity = 1.6;
+		this.immunity = 2.5;
 		if (kind === 'honey') this.honeyCoat = 9;
 		if (kind === 'web' && this.stuckWeb) this.breakWeb(this.stuckWeb, false);
 		this.stuckWeb = null;
-		ctx.player.launch(0, 14, 0);
+		ctx.player.launch(0, 20, 0, 0.5);
 		ctx.player.model.setExpression('happy');
 		ctx.audio.play('boing', { pitch: 1.3 });
 		ctx.chaos.add('escape', ctx.player.position);

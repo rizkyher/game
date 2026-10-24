@@ -101,7 +101,10 @@ export class BeeAbilities {
 		}
 
 		if (env.stuck) {
-			if (input.anyPressed()) env.addStruggle(0.115);
+			// Each press is a big wiggle; simply holding a direction keeps wriggling slowly.
+			if (input.anyPressed()) env.addStruggle(0.2);
+			const holding = input.isDown('up') || input.axis('back', 'forward') !== 0 || input.axis('left', 'right') !== 0;
+			if (holding) env.addStruggle(0.35 * dt, false);
 			this.updatePrompt(dt);
 			return;
 		}
